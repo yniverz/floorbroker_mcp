@@ -117,6 +117,7 @@ or add ghcr.io registry credentials in Portainer.
 | `SNAPSHOT_INTERVAL_MIN` / `PNL_SYNC_INTERVAL_MIN` | `5` / `15` | Equity snapshot and realized-PnL sync intervals. |
 | `OUTBOUND_PROXY` | `http://10.0.0.5:8888` | Optional HTTP proxy for platform API calls (static egress IP, see below). |
 | `OUTBOUND_PROXY_PLATFORMS` | `bybit` | Platforms routed through `OUTBOUND_PROXY` (`*` = all). |
+| `OUTBOUND_PROXY_VIA` | `socks5://netbird:1080` | Optional SOCKS5 hop used to reach `OUTBOUND_PROXY` (e.g. a VPN sidecar). |
 
 See [.env.example](.env.example) for everything else.
 
@@ -148,6 +149,30 @@ Bybit keys should be bound to fixed IPs (unbound keys expire). If floorbroker ru
 small forward proxy on a host with a static IP (e.g. tinyproxy on a VPS, reachable only over your VPN, allowing
 `CONNECT` to port 443 for the Bybit API hosts only) and set `OUTBOUND_PROXY`. TLS stays end to end; the proxy
 never sees API secrets. The Bybit "add account" page shows the IP Bybit will see, so you know what to bind.
+
+If the proxy is only reachable over a mesh VPN and the Docker host can't run a kernel VPN client (no
+`/dev/net/tun`, e.g. inside an LXC), add a VPN sidecar in userspace mode and point `OUTBOUND_PROXY_VIA` at its
+SOCKS5 port. NetBird example:
+
+```yaml
+  netbird:
+    image: netbirdio/netbird:0.83.1
+    environment:
+      NB_SETUP_KEY: ${NB_SETUP_KEY}
+      NB_MANAGEMENT_URL: https://netbird.example.com
+      NB_HOSTNAME: floorbroker
+      NB_USE_NETSTACK_MODE: "true"
+      NB_SOCKS5_LISTENER_ADDRESS: 0.0.0.0
+      NB_SOCKS5_LISTENER_PORT: "1080"
+      NB_DISABLE_DNS: "true"
+      NB_DISABLE_CLIENT_ROUTES: "true"
+      NB_BLOCK_INBOUND: "true"
+    volumes: [netbird-state:/var/lib/netbird]
+  floorbroker:
+    environment:
+      OUTBOUND_PROXY: http://<proxy mesh IP>:8888
+      OUTBOUND_PROXY_VIA: socks5://netbird:1080
+```
 
 ### Data
 

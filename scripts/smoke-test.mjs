@@ -28,6 +28,30 @@ proxy.on("connect", (req, client, head) => {
 });
 await new Promise((r) => proxy.listen(0, "127.0.0.1", r));
 const PROXY_PORT = proxy.address().port;
+
+// Minimal SOCKS5 server (no auth) in front of it, like a NetBird netstack sidecar (OUTBOUND_PROXY_VIA).
+const socksSeen = [];
+const socks = net.createServer((c) => {
+  c.once("data", () => {
+    c.write(Buffer.from([5, 0]));
+    c.once("data", (req) => {
+      let host, off;
+      if (req[3] === 1) { host = [...req.subarray(4, 8)].join("."); off = 8; }
+      else { const n = req[4]; host = req.subarray(5, 5 + n).toString(); off = 5 + n; }
+      const port = req.readUInt16BE(off);
+      socksSeen.push(`${host}:${port}`);
+      const up = net.connect(port, host, () => {
+        c.write(Buffer.from([5, 0, 0, 1, 0, 0, 0, 0, 0, 0]));
+        up.pipe(c);
+        c.pipe(up);
+      });
+      up.on("error", () => c.destroy());
+      c.on("error", () => up.destroy());
+    });
+  });
+});
+await new Promise((r) => socks.listen(0, "127.0.0.1", r));
+const SOCKS_PORT = socks.address().port;
 const BASE = `http://localhost:${PORT}`;
 const dataDir = mkdtempSync(path.join(tmpdir(), "floorbroker-smoke-"));
 const env = {
@@ -41,6 +65,7 @@ const env = {
   LOG_LEVEL: "warn",
   OUTBOUND_PROXY: `http://127.0.0.1:${PROXY_PORT}`,
   OUTBOUND_PROXY_PLATFORMS: "bybit",
+  OUTBOUND_PROXY_VIA: `socks5://127.0.0.1:${SOCKS_PORT}`,
 };
 
 let failures = 0;
@@ -53,6 +78,7 @@ const server = spawn(process.execPath, ["dist/index.js"], { env, stdio: ["ignore
 const stop = () => {
   server.kill("SIGTERM");
   proxy.close();
+  socks.close();
   rmSync(dataDir, { recursive: true, force: true });
 };
 
@@ -206,6 +232,7 @@ try {
   check(!c3.isError && c3.data.fetched_from_platform === 0 && c3.data.count >= 98, "get_candles cache_only", c3.data.count);
 
   check(proxySeen.includes("api.bybit.com"), "Bybit requests go through OUTBOUND_PROXY", [...new Set(proxySeen)]);
+  check(socksSeen.includes(`127.0.0.1:${PROXY_PORT}`), "OUTBOUND_PROXY is reached through OUTBOUND_PROXY_VIA (SOCKS5)", [...new Set(socksSeen)]);
 
   const cov = await call("list_cached_candles", { account_id: acct.id });
   check(!cov.isError && cov.data.ranges?.length === 1, "list_cached_candles", cov.data.ranges);

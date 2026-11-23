@@ -12,8 +12,8 @@ async function main(): Promise<void> {
   const config = loadConfig();
   setLogLevel(config.logLevel);
   mkdirSync(config.dataDir, { recursive: true });
-  configureOutboundProxy(config.outboundProxy, config.outboundProxyPlatforms);
-  if (config.outboundProxy) logger.info("outbound proxy enabled", { proxy: proxyLabel(), platforms: config.outboundProxyPlatforms });
+  configureOutboundProxy(config.outboundProxy, config.outboundProxyPlatforms, config.outboundProxyVia);
+  if (config.outboundProxy) logger.info("outbound proxy enabled", { proxy: proxyLabel(), via: config.outboundProxyVia, platforms: config.outboundProxyPlatforms });
 
   const db = openAppDb(config.appDbPath);
   const marketDb = openMarketDb(config.marketDbPath);

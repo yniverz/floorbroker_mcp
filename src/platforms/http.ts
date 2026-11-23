@@ -1,14 +1,44 @@
-import { ProxyAgent, fetch as undiciFetch } from "undici";
+import { Pool, ProxyAgent, fetch as undiciFetch } from "undici";
 import { PlatformError } from "./errors.js";
+import { socks5Connect } from "./socks.js";
 
 // --- outbound proxy -------------------------------------------------------------
 // Some platforms bind API keys to fixed IPs (Bybit). OUTBOUND_PROXY routes the
 // requests of selected platforms through an HTTP proxy with a static public IP.
+// OUTBOUND_PROXY_VIA (socks5://host:port) optionally reaches that proxy through a
+// SOCKS5 server, e.g. a NetBird sidecar in userspace (netstack) mode.
 
 let proxy: { url: string; agent: ProxyAgent; platforms: Set<string> } | null = null;
 
-export function configureOutboundProxy(url: string | null, platforms: string[]): void {
-  proxy = url ? { url, agent: new ProxyAgent(url), platforms: new Set(platforms.map((p) => p.toLowerCase())) } : null;
+export function configureOutboundProxy(url: string | null, platforms: string[], via: string | null = null): void {
+  if (!url) {
+    proxy = null;
+    return;
+  }
+  let agent: ProxyAgent;
+  if (via) {
+    const v = new URL(via);
+    if (v.protocol !== "socks5:" && v.protocol !== "socks5h:") throw new Error("OUTBOUND_PROXY_VIA must be a socks5:// URL");
+    const socksHost = v.hostname;
+    const socksPort = Number(v.port || 1080);
+    agent = new ProxyAgent({
+      uri: url,
+      // The connection to the HTTP proxy itself is opened through SOCKS5.
+      clientFactory: (origin, opts) =>
+        new Pool(origin, {
+          ...opts,
+          connect: (o, cb) => {
+            socks5Connect(socksHost, socksPort, o.hostname, Number(o.port) || 80).then(
+              (s) => cb(null, s),
+              (e: Error) => cb(e, null),
+            );
+          },
+        }),
+    });
+  } else {
+    agent = new ProxyAgent(url);
+  }
+  proxy = { url, agent, platforms: new Set(platforms.map((p) => p.toLowerCase())) };
 }
 
 export function usesProxy(platform: string | undefined): boolean {

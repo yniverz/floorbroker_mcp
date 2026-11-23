@@ -68,6 +68,7 @@ export interface Config {
   logLevel: string;
   outboundProxy: string | null;
   outboundProxyPlatforms: string[];
+  outboundProxyVia: string | null;
 }
 
 export function loadConfig(): Config {
@@ -124,6 +125,7 @@ export function loadConfig(): Config {
     toolLogRetentionDays: int("TOOL_LOG_RETENTION_DAYS", 365),
     logLevel: env("LOG_LEVEL", "info"),
     outboundProxy: proxyUrl(process.env.OUTBOUND_PROXY),
+    outboundProxyVia: process.env.OUTBOUND_PROXY_VIA || null,
     outboundProxyPlatforms: list("OUTBOUND_PROXY_PLATFORMS", "bybit").map((p) => p.toLowerCase()),
   };
 }
