@@ -1,0 +1,49 @@
+services:
+  floorbroker:
+    # Prebuilt image from GitHub Actions. To build locally instead, replace with:
+    #   build: { context: ., dockerfile: Dockerfile }
+    image: ghcr.io/yniverz/floorbroker_mcp:latest
+    container_name: floorbroker
+    restart: unless-stopped
+
+    environment:
+      PUBLIC_URL: "${PUBLIC_URL:?set the external https origin, e.g. https://trade.example.com}"
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY:?generate one with: openssl rand -base64 32 (keep it safe: losing it makes stored API keys unreadable)}"
+      ADMIN_USERNAME: "${ADMIN_USERNAME:-admin}"
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:-}"
+
+      PORT: 8080
+      DATA_DIR: /data
+      TRUST_PROXY: ${TRUST_PROXY:-1}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://claude.ai,https://www.claude.ai,https://chatgpt.com}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-}
+      OAUTH_ALLOWED_REDIRECT_HOSTS: ${OAUTH_ALLOWED_REDIRECT_HOSTS:-}
+      OAUTH_ACCESS_TOKEN_TTL_MIN: ${OAUTH_ACCESS_TOKEN_TTL_MIN:-60}
+      OAUTH_REFRESH_TOKEN_TTL_DAYS: ${OAUTH_REFRESH_TOKEN_TTL_DAYS:-30}
+      SNAPSHOT_INTERVAL_MIN: ${SNAPSHOT_INTERVAL_MIN:-5}
+      PNL_SYNC_INTERVAL_MIN: ${PNL_SYNC_INTERVAL_MIN:-15}
+      TOOL_LOG_RETENTION_DAYS: ${TOOL_LOG_RETENTION_DAYS:-365}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+
+    ports:
+      - "${BIND_HOST:-127.0.0.1}:${HOST_PORT:-8080}:8080"
+
+    volumes:
+      - floorbroker-data:/data
+
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  floorbroker-data:
