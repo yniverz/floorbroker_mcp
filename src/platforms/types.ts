@@ -110,6 +110,8 @@ export interface PlatformDefinition {
   /** Short how-to shown on the "add account" page. */
   setupHelp: string[];
   credentialFields: CredentialField[];
+  /** API keys are usually bound to fixed IPs; the UI then shows the server's outbound IP. */
+  ipAllowlist?: boolean;
   environments: PlatformEnvironment[];
   capabilities: PlatformCapabilities;
   createClient(ctx: PlatformClientContext): PlatformClient;

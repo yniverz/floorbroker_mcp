@@ -31,6 +31,13 @@ function bool(name: string, fallback: boolean): boolean {
   return ["1", "true", "yes", "on"].includes(raw.toLowerCase());
 }
 
+function proxyUrl(raw: string | undefined): string | null {
+  if (!raw) return null;
+  const u = new URL(raw);
+  if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error("OUTBOUND_PROXY must be an http:// or https:// proxy URL");
+  return raw;
+}
+
 export interface Config {
   port: number;
   publicUrl: string;
@@ -59,6 +66,8 @@ export interface Config {
   pnlSyncIntervalMs: number;
   toolLogRetentionDays: number;
   logLevel: string;
+  outboundProxy: string | null;
+  outboundProxyPlatforms: string[];
 }
 
 export function loadConfig(): Config {
@@ -114,5 +123,7 @@ export function loadConfig(): Config {
     pnlSyncIntervalMs: int("PNL_SYNC_INTERVAL_MIN", 15) * 60_000,
     toolLogRetentionDays: int("TOOL_LOG_RETENTION_DAYS", 365),
     logLevel: env("LOG_LEVEL", "info"),
+    outboundProxy: proxyUrl(process.env.OUTBOUND_PROXY),
+    outboundProxyPlatforms: list("OUTBOUND_PROXY_PLATFORMS", "bybit").map((p) => p.toLowerCase()),
   };
 }

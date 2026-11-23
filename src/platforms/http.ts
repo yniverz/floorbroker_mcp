@@ -1,14 +1,71 @@
+import { ProxyAgent, fetch as undiciFetch } from "undici";
 import { PlatformError } from "./errors.js";
 
-/** fetch with a timeout that maps network failures to PlatformError("network"). */
-export async function httpFetch(url: string, init: RequestInit & { timeoutMs?: number } = {}): Promise<Response> {
-  const { timeoutMs = 15_000, ...rest } = init;
+// --- outbound proxy -------------------------------------------------------------
+// Some platforms bind API keys to fixed IPs (Bybit). OUTBOUND_PROXY routes the
+// requests of selected platforms through an HTTP proxy with a static public IP.
+
+let proxy: { url: string; agent: ProxyAgent; platforms: Set<string> } | null = null;
+
+export function configureOutboundProxy(url: string | null, platforms: string[]): void {
+  proxy = url ? { url, agent: new ProxyAgent(url), platforms: new Set(platforms.map((p) => p.toLowerCase())) } : null;
+}
+
+export function usesProxy(platform: string | undefined): boolean {
+  return !!proxy && !!platform && (proxy.platforms.has("*") || proxy.platforms.has(platform.toLowerCase()));
+}
+
+/** Proxy URL without credentials, for display. */
+export function proxyLabel(): string | null {
+  if (!proxy) return null;
+  const u = new URL(proxy.url);
+  return `${u.protocol}//${u.host}`;
+}
+
+/**
+ * fetch with a timeout that maps network failures to PlatformError("network").
+ * Pass `platform` so requests are routed through OUTBOUND_PROXY when configured for it.
+ */
+export async function httpFetch(url: string, init: RequestInit & { timeoutMs?: number; platform?: string } = {}): Promise<Response> {
+  const { timeoutMs = 15_000, platform, ...rest } = init;
   try {
+    if (usesProxy(platform)) {
+      const res = await undiciFetch(url, {
+        ...(rest as Parameters<typeof undiciFetch>[1]),
+        dispatcher: proxy!.agent,
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      return res as unknown as Response;
+    }
     return await fetch(url, { ...rest, signal: AbortSignal.timeout(timeoutMs) });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new PlatformError("network", `Could not reach ${new URL(url).host}: ${msg}`);
+    const cause = err instanceof Error && err.cause instanceof Error ? ` (${err.cause.message})` : "";
+    const msg = (err instanceof Error ? err.message : String(err)) + cause;
+    const via = usesProxy(platform) ? ` via outbound proxy ${proxyLabel()}` : "";
+    throw new PlatformError("network", `Could not reach ${new URL(url).host}${via}: ${msg}`);
   }
+}
+
+const egressCache = new Map<string, { ip: string | null; error: string | null; at: number }>();
+
+/** Public IP the given platform sees for this server (through the proxy if one applies). Cached 10 min. */
+export async function egressIp(platform: string): Promise<{ ip: string | null; error: string | null; viaProxy: boolean }> {
+  const key = usesProxy(platform) ? `proxy:${proxy!.url}` : "direct";
+  const viaProxy = usesProxy(platform);
+  const hit = egressCache.get(key);
+  if (hit && Date.now() - hit.at < 600_000) return { ip: hit.ip, error: hit.error, viaProxy };
+  let ip: string | null = null;
+  let error: string | null = null;
+  try {
+    const res = await httpFetch("https://checkip.amazonaws.com/", { platform, timeoutMs: 8000 });
+    const text = (await res.text()).trim();
+    if (res.ok && /^[0-9a-f.:]{3,45}$/i.test(text)) ip = text;
+    else error = `unexpected answer (HTTP ${res.status})`;
+  } catch (err) {
+    error = err instanceof Error ? err.message : String(err);
+  }
+  egressCache.set(key, { ip, error, at: Date.now() });
+  return { ip, error, viaProxy };
 }
 
 /**

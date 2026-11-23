@@ -59,6 +59,7 @@ export const bybitPlatform: PlatformDefinition = {
     "Sub-account keys work too and keep the agent's funds separate from your main account.",
     "Paste the API key and secret here and pick the region your account is registered with.",
   ],
+  ipAllowlist: true,
   credentialFields: [
     { key: "apiKey", label: "API key", type: "text", required: true, secret: true },
     { key: "apiSecret", label: "API secret", type: "password", required: true, secret: true },

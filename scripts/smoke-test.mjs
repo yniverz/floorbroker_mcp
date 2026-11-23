@@ -4,10 +4,30 @@
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
+import http from "node:http";
+import net from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 const PORT = 18080 + Math.floor(Math.random() * 1000);
+
+// Minimal CONNECT proxy to verify OUTBOUND_PROXY routing (Bybit requests must pass through it).
+const proxySeen = [];
+const proxy = http.createServer((_req, res) => res.writeHead(405).end());
+proxy.on("connect", (req, client, head) => {
+  const [host, port] = req.url.split(":");
+  proxySeen.push(host);
+  const upstream = net.connect(Number(port) || 443, host, () => {
+    client.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+    upstream.write(head);
+    upstream.pipe(client);
+    client.pipe(upstream);
+  });
+  upstream.on("error", () => client.destroy());
+  client.on("error", () => upstream.destroy());
+});
+await new Promise((r) => proxy.listen(0, "127.0.0.1", r));
+const PROXY_PORT = proxy.address().port;
 const BASE = `http://localhost:${PORT}`;
 const dataDir = mkdtempSync(path.join(tmpdir(), "floorbroker-smoke-"));
 const env = {
@@ -19,6 +39,8 @@ const env = {
   ADMIN_USERNAME: "admin",
   ADMIN_PASSWORD: "smoke-test-password-123",
   LOG_LEVEL: "warn",
+  OUTBOUND_PROXY: `http://127.0.0.1:${PROXY_PORT}`,
+  OUTBOUND_PROXY_PLATFORMS: "bybit",
 };
 
 let failures = 0;
@@ -30,6 +52,7 @@ const check = (cond, label, extra) => {
 const server = spawn(process.execPath, ["dist/index.js"], { env, stdio: ["ignore", "inherit", "inherit"] });
 const stop = () => {
   server.kill("SIGTERM");
+  proxy.close();
   rmSync(dataDir, { recursive: true, force: true });
 };
 
@@ -182,6 +205,8 @@ try {
   const c3 = await call("get_candles", { account_id: acct.id, instrument_id: "linear:BTCUSDT", resolution: "1h", limit: 100, cache_only: true });
   check(!c3.isError && c3.data.fetched_from_platform === 0 && c3.data.count >= 98, "get_candles cache_only", c3.data.count);
 
+  check(proxySeen.includes("api.bybit.com"), "Bybit requests go through OUTBOUND_PROXY", [...new Set(proxySeen)]);
+
   const cov = await call("list_cached_candles", { account_id: acct.id });
   check(!cov.isError && cov.data.ranges?.length === 1, "list_cached_candles", cov.data.ranges);
 
@@ -196,6 +221,8 @@ try {
     const r = await web(p);
     check(r.status === 200, `GET ${p}`, r.status);
   }
+  const addPage = await (await web("/accounts/new?platform=bybit")).text();
+  check(/sees this server as <code>[0-9a-f.:]+<\/code> \(via outbound proxy/.test(addPage), "Bybit add page shows egress IP via proxy");
   const act = await (await web("/activity")).text();
   check(act.includes("get_candles"), "activity log records tool calls");
 } catch (err) {

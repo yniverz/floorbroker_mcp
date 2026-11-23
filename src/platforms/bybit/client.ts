@@ -108,7 +108,7 @@ export class BybitHttp {
     await this.publicLimiter.acquire();
     const qs = buildQuery(params);
     const url = `https://${this.opts.publicHost}${path}${qs ? `?${qs}` : ""}`;
-    const res = await httpFetch(url, { method: "GET", headers: { Accept: "application/json" } });
+    const res = await httpFetch(url, { platform: "bybit", method: "GET", headers: { Accept: "application/json" } });
     const env = await this.parse<T>(res, path, this.opts.publicHost);
     if (env.retCode !== 0) throw mapRetCode(env.retCode, env.retMsg, path);
     return { result: env.result, time: env.time ?? Date.now() };
@@ -165,7 +165,7 @@ export class BybitHttp {
       headers["Content-Type"] = "application/json";
       init.body = payload;
     }
-    const res = await httpFetch(url, init);
+    const res = await httpFetch(url, { ...init, platform: "bybit" });
     const env = await this.parse<T>(res, path, this.opts.host);
     if (env.retCode === 10002 && !retried) {
       await this.syncTime();
@@ -178,7 +178,7 @@ export class BybitHttp {
   /** Learn the offset between the local clock and Bybit's server time. */
   async syncTime(): Promise<void> {
     const before = Date.now();
-    const res = await httpFetch(`https://${this.opts.host}/v5/market/time`, { method: "GET" });
+    const res = await httpFetch(`https://${this.opts.host}/v5/market/time`, { platform: "bybit", method: "GET" });
     const env = await this.parse<{ timeNano?: string; timeSecond?: string }>(res, "/v5/market/time", this.opts.host);
     const after = Date.now();
     const server = env.time ?? (env.result?.timeSecond ? Number(env.result.timeSecond) * 1000 : NaN);

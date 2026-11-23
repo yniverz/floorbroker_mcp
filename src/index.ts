@@ -6,11 +6,14 @@ import { openAppDb } from "./db/app.js";
 import { openMarketDb } from "./db/marketdata.js";
 import { createApp } from "./http/app.js";
 import { logger, setLogLevel } from "./logger.js";
+import { configureOutboundProxy, proxyLabel } from "./platforms/http.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
   setLogLevel(config.logLevel);
   mkdirSync(config.dataDir, { recursive: true });
+  configureOutboundProxy(config.outboundProxy, config.outboundProxyPlatforms);
+  if (config.outboundProxy) logger.info("outbound proxy enabled", { proxy: proxyLabel(), platforms: config.outboundProxyPlatforms });
 
   const db = openAppDb(config.appDbPath);
   const marketDb = openMarketDb(config.marketDbPath);

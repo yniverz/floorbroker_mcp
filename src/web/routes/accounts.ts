@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import type { AppContext } from "../../context.js";
 import { logger } from "../../logger.js";
+import { egressIp, proxyLabel } from "../../platforms/http.js";
 import { getPlatform, listPlatforms } from "../../platforms/registry.js";
 import type { AgentEnvironment, EnvironmentId, Order, PlatformDefinition, Position } from "../../platforms/types.js";
 import type { PlatformAccountRow } from "../../repos/accounts.js";
@@ -12,6 +13,22 @@ import { RANGES, rangeFrom, rangeTabs } from "./dashboard.js";
 
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   return Promise.race([p, new Promise<T>((_, reject) => setTimeout(() => reject(new Error("timed out")), ms))]);
+}
+
+type Egress = { ip: string | null; error: string | null; viaProxy: boolean } | null;
+
+async function egressFor(platform: PlatformDefinition | undefined): Promise<Egress> {
+  return platform?.ipAllowlist ? egressIp(platform.id) : null;
+}
+
+function egressBlock(platform: PlatformDefinition, egress: Egress): Html {
+  if (!egress) return html``;
+  return html`<div class="flash ${egress.ip ? "ok" : "error"} small">
+    ${egress.ip
+      ? html`${platform.name} sees this server as <code>${egress.ip}</code>${egress.viaProxy ? html` (via outbound proxy ${proxyLabel()})` : ""}.
+          Bind the API key to this IP; keys without an IP binding may expire.`
+      : html`Could not determine the outbound IP${egress.viaProxy ? html` through the proxy ${proxyLabel()}` : ""}: ${egress.error}`}
+  </div>`;
 }
 
 function credentialInputs(platform: PlatformDefinition, values: Record<string, string>, editing: boolean): Html {
@@ -49,7 +66,13 @@ function missingRequired(platform: PlatformDefinition, creds: Record<string, str
   return platform.credentialFields.filter((f) => f.required && !creds[f.key]).map((f) => f.label);
 }
 
-function addForm(req: Request, platform: PlatformDefinition, values: { label: string; environment: string; agentEnvironment: string; creds: Record<string, string> }, errors: string[]): Html {
+function addForm(
+  req: Request,
+  platform: PlatformDefinition,
+  values: { label: string; environment: string; agentEnvironment: string; creds: Record<string, string> },
+  errors: string[],
+  egress: Egress,
+): Html {
   return html`<div class="page-head"><h1>Add ${platform.name} account</h1><a href="/accounts/new">← Choose platform</a></div>
   <div class="cols">
     <section class="card">
@@ -75,6 +98,7 @@ function addForm(req: Request, platform: PlatformDefinition, values: { label: st
       </form>
     </section>
     <aside class="card">
+      ${egressBlock(platform, egress)}
       <h3>How to get credentials</h3>
       <ol class="small">${platform.setupHelp.map((s) => html`<li>${s}</li>`)}</ol>
       <p class="small muted">Credentials are encrypted at rest (AES-256-GCM). Keys that allow withdrawals are refused.</p>
@@ -154,7 +178,7 @@ export function accountsRouter(ctx: AppContext): Router {
     );
   });
 
-  router.get("/new", (req, res) => {
+  router.get("/new", async (req, res) => {
     const platformId = typeof req.query.platform === "string" ? req.query.platform : "";
     const platform = getPlatform(platformId);
     if (!platform) {
@@ -177,7 +201,7 @@ export function accountsRouter(ctx: AppContext): Router {
       res,
       200,
       pageOpts(req, res, `Add ${platform.name} account`, "accounts"),
-      addForm(req, platform, { label: "", environment: firstEnv.id, agentEnvironment: firstEnv.isDemo ? "demo" : "live", creds: {} }, []),
+      addForm(req, platform, { label: "", environment: firstEnv.id, agentEnvironment: firstEnv.isDemo ? "demo" : "live", creds: {} }, [], await egressFor(platform)),
     );
   });
 
@@ -194,11 +218,11 @@ export function accountsRouter(ctx: AppContext): Router {
 
     const missing = missingRequired(platform, creds);
     if (missing.length) {
-      return send(res, 400, pageOpts(req, res, "Add account", "accounts"), addForm(req, platform, values, [`Missing: ${missing.join(", ")}`]));
+      return send(res, 400, pageOpts(req, res, "Add account", "accounts"), addForm(req, platform, values, [`Missing: ${missing.join(", ")}`], await egressFor(platform)));
     }
     const result = await ctx.accountService.validate(platform, env.id as EnvironmentId, creds);
     if (result.errors.length > 0) {
-      return send(res, 400, pageOpts(req, res, "Add account", "accounts"), addForm(req, platform, values, result.errors));
+      return send(res, 400, pageOpts(req, res, "Add account", "accounts"), addForm(req, platform, values, result.errors, await egressFor(platform)));
     }
     const row = ctx.accounts.create({
       userId: user.id,
@@ -240,6 +264,7 @@ export function accountsRouter(ctx: AppContext): Router {
     const allowedBy = conns.filter((c) => c.accountIds.includes(a.id));
     const calls = ctx.activity.listToolCalls({ userId: user.id, accountId: a.id, tradesOnly: true, limit: 15 });
 
+    const egress = await egressFor(platform);
     let positions: Position[] | null = null;
     let orders: Order[] | null = null;
     let liveError: string | null = null;
@@ -330,6 +355,7 @@ export function accountsRouter(ctx: AppContext): Router {
         </section>
         <section class="card">
           <h2>Replace credentials</h2>
+          ${platform ? egressBlock(platform, egress) : ""}
           ${platform
             ? html`<form method="post" action="/accounts/${a.id}/credentials" class="stack" autocomplete="off">
                 ${csrfField(req)}

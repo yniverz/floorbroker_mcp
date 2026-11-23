@@ -115,6 +115,8 @@ or add ghcr.io registry credentials in Portainer.
 | `ALLOWED_HOSTS` | | Extra `Host` values if your proxy rewrites `Host`. |
 | `OAUTH_ALLOWED_REDIRECT_HOSTS` | `claude.ai,chatgpt.com` | Optional: only these clients may register. |
 | `SNAPSHOT_INTERVAL_MIN` / `PNL_SYNC_INTERVAL_MIN` | `5` / `15` | Equity snapshot and realized-PnL sync intervals. |
+| `OUTBOUND_PROXY` | `http://10.0.0.5:8888` | Optional HTTP proxy for platform API calls (static egress IP, see below). |
+| `OUTBOUND_PROXY_PLATFORMS` | `bybit` | Platforms routed through `OUTBOUND_PROXY` (`*` = all). |
 
 See [.env.example](.env.example) for everything else.
 
@@ -139,6 +141,13 @@ to `/login`; keep those reachable from the same browser.
 
 Also: terminate TLS at the proxy, forward the original `Host` (or set `ALLOWED_HOSTS`), set `X-Forwarded-For`,
 and don't add a path prefix.
+
+### Static egress IP (Bybit IP binding)
+
+Bybit keys should be bound to fixed IPs (unbound keys expire). If floorbroker runs behind a dynamic IP, run a
+small forward proxy on a host with a static IP (e.g. tinyproxy on a VPS, reachable only over your VPN, allowing
+`CONNECT` to port 443 for the Bybit API hosts only) and set `OUTBOUND_PROXY`. TLS stays end to end; the proxy
+never sees API secrets. The Bybit "add account" page shows the IP Bybit will see, so you know what to bind.
 
 ### Data
 
@@ -173,6 +182,7 @@ be edited (accounts, permission, limits) or revoked at any time under **Agents**
   Spot and Options trade as needed. **No withdrawal or transfer permissions.** Binding an IP is recommended.
 - Environments: *Live* (pick your region host: global, EU, NL, TR, KZ, GE, AE, HK, ID), *Demo trading*
   (keys created in Bybit's demo mode), *Testnet*.
+- Bind the key to the IP shown on the add-account page (set `OUTBOUND_PROXY` if your server has no static IP).
 - Sizes are in base coin for spot/linear/options and in USD contracts for inverse. Spot holdings appear as
   balances, not positions. Options have no candle history on Bybit.
 

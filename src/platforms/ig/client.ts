@@ -146,7 +146,7 @@ export class IgHttp {
       throw new PlatformError("auth_failed", "IG credentials are incomplete: username, password and API key are required.");
     }
     await this.limiters.nonTrading.acquire();
-    const res = await httpFetch(`${this.baseUrl}/session`, {
+    const res = await httpFetch(`${this.baseUrl}/session`, { platform: "ig",
       method: "POST",
       headers: this.baseHeaders(2),
       body: JSON.stringify({ identifier: this.creds.username, password: this.creds.password }),
@@ -180,7 +180,7 @@ export class IgHttp {
       }
       const targetId = match?.accountId ?? target;
       await this.limiters.nonTrading.acquire();
-      const sw = await httpFetch(`${this.baseUrl}/session`, {
+      const sw = await httpFetch(`${this.baseUrl}/session`, { platform: "ig",
         method: "PUT",
         headers: { ...this.baseHeaders(1), CST: cst, "X-SECURITY-TOKEN": xst },
         body: JSON.stringify({ accountId: targetId, defaultAccount: false }),
@@ -230,7 +230,7 @@ export class IgHttp {
         headers["_method"] = "DELETE";
         method = "POST";
       }
-      const res = await httpFetch(url.toString(), {
+      const res = await httpFetch(url.toString(), { platform: "ig",
         method,
         headers,
         body: req.body === undefined ? undefined : JSON.stringify(req.body),
