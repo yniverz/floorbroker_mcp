@@ -40,7 +40,7 @@ const capabilities: PlatformCapabilities = {
     "Spot holdings are balances (see get_account), not positions: reduce them with a spot sell order. reduceOnly applies to derivatives only.",
     "Options settle in the coin shown in the symbol suffix (currently USDT), have no stop orders and no candles, and appear in search results only with type=option or an option-style query like BTC-25DEC26.",
     "Stop orders trigger on the last traded price. Stop loss / take profit attached to a derivatives order cover the whole position.",
-    "Accounts in hedge mode must pass positionSide (long/short) on orders; one-way accounts must omit it.",
+    "The position mode (one-way or hedge) is detected automatically and shown in get_account; positionSide is optional and only picks the side on hedge-mode accounts.",
     "A trailing stop cannot be attached to a new order: set it on the open position with set_position_protection.",
     "Demo trading uses real mainnet prices but keeps order history for 7 days only; testnet has its own, unrelated prices.",
   ],

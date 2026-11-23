@@ -174,6 +174,10 @@ export interface AccountSummary {
   available: number | null;
   unrealizedPnl: number | null;
   marginUsed: number | null;
+  /** one_way = one net position per instrument; hedge = separate long and short positions. Null when not applicable/unknown. */
+  positionMode?: "one_way" | "hedge" | null;
+  /** e.g. "cross", "isolated", "portfolio"; null when not applicable/unknown. */
+  marginMode?: string | null;
   balances: Balance[];
   extra?: Record<string, unknown>;
 }
@@ -381,7 +385,11 @@ export interface PlaceOrderRequest {
   takeProfit?: number;
   trailingStopDistance?: number;
   guaranteedStop?: boolean;
-  /** Only for accounts in hedge mode: which position the order belongs to. */
+  /**
+   * Hedge-mode accounts only: which position (long/short) the order belongs to. Optional: adapters
+   * detect the account's position mode and derive the side (buy opens long, sell opens short,
+   * reduce-only closes the opposite side). Ignored on one-way accounts.
+   */
   positionSide?: PositionSide;
   clientOrderId?: string;
 }

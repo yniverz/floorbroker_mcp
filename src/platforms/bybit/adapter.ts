@@ -163,6 +163,14 @@ function pick(i: Instrument): InstrumentSummary {
   };
 }
 
+type PositionMode = "one_way" | "hedge";
+
+function isPositionModeMismatch(err: unknown): boolean {
+  return err instanceof PlatformError && /position idx not match position mode/i.test(err.message);
+}
+
+const MARGIN_MODES: Record<string, string> = { REGULAR_MARGIN: "cross", ISOLATED_MARGIN: "isolated", PORTFOLIO_MARGIN: "portfolio" };
+
 export class BybitClient implements PlatformClient {
   private readonly http: BybitHttp;
 
@@ -295,12 +303,43 @@ export class BybitClient implements PlatformClient {
       try {
         const r = await this.http.privateGet<{ list: RawWallet[] }>("/v5/account/wallet-balance", { accountType: "UNIFIED" });
         const w = r.result.list?.[0];
-        if (w) return this.mapUnifiedWallet(w);
+        if (w) return { ...this.mapUnifiedWallet(w), ...(await this.accountModes()) };
       } catch (err) {
         if (!(err instanceof PlatformError) || !TOLERATED.has(err.code) || this.ctx.meta.uta === true) throw err;
       }
     }
     return this.classicAccount();
+  }
+
+  private modesCache: { at: number; marginMode: string | null } | null = null;
+
+  /** Margin mode from /v5/account/info (cached 10 min) and the learned/inferred position mode for USDT perpetuals. */
+  private async accountModes(): Promise<{ positionMode: PositionMode | null; marginMode: string | null }> {
+    if (!this.modesCache || Date.now() - this.modesCache.at > 600_000) {
+      let marginMode: string | null = null;
+      try {
+        const info = (await this.http.privateGet<AccountInfoResult>("/v5/account/info")).result;
+        marginMode = info?.marginMode ? (MARGIN_MODES[info.marginMode] ?? info.marginMode.toLowerCase()) : null;
+      } catch {
+        marginMode = null;
+      }
+      this.modesCache = { at: Date.now(), marginMode };
+    }
+    let positionMode = this.knownPositionMode("linear");
+    if (!positionMode) {
+      // Infer from open USDT perpetual positions: positionIdx 1/2 only exist in hedge mode.
+      try {
+        const r = await this.http.privateGet<{ list: RawPosition[] }>("/v5/position/list", { category: "linear", settleCoin: "USDT" });
+        const open = (r.result.list ?? []).filter((p) => (num(p.size) ?? 0) > 0);
+        if (open.length > 0) {
+          positionMode = open.some((p) => p.positionIdx === 1 || p.positionIdx === 2) ? "hedge" : "one_way";
+          this.rememberPositionMode("linear", positionMode);
+        }
+      } catch {
+        positionMode = null;
+      }
+    }
+    return { positionMode, marginMode: this.modesCache.marginMode };
   }
 
   private mapUnifiedWallet(w: RawWallet): AccountSummary {
@@ -981,7 +1020,7 @@ export class BybitClient implements PlatformClient {
     } else {
       if (req.reduceOnly) body.reduceOnly = true;
       if (category === "linear" || category === "inverse") {
-        posIdx = req.positionSide === "long" ? 1 : req.positionSide === "short" ? 2 : 0;
+        posIdx = this.positionIdxFor(category, req, this.knownPositionMode(category));
         body.positionIdx = posIdx;
         if (req.takeProfit !== undefined || req.stopLoss !== undefined) body.tpslMode = "Full";
         if (isStop) {
@@ -997,8 +1036,49 @@ export class BybitClient implements PlatformClient {
       throw new PlatformError("invalid_request", "Bybit does not allow stopLoss/takeProfit on reduceOnly orders. Remove them or drop reduceOnly.");
     }
 
-    const r = await this.http.privatePost<{ orderId: string; orderLinkId?: string }>("/v5/order/create", body);
+    let r: { result: { orderId: string; orderLinkId?: string } };
+    try {
+      r = await this.http.privatePost<{ orderId: string; orderLinkId?: string }>("/v5/order/create", body);
+      if (category === "linear" || category === "inverse") this.rememberPositionMode(category, posIdx === 0 ? "one_way" : "hedge");
+    } catch (err) {
+      // The account's position mode differs from what we assumed: switch and retry once.
+      if (!(category === "linear" || category === "inverse") || !isPositionModeMismatch(err)) throw err;
+      const mode: PositionMode = posIdx === 0 ? "hedge" : "one_way";
+      posIdx = this.positionIdxFor(category, req, mode);
+      body.positionIdx = posIdx;
+      r = await this.http.privatePost<{ orderId: string; orderLinkId?: string }>("/v5/order/create", body);
+      this.rememberPositionMode(category, mode);
+      notes.push(`Detected ${mode === "hedge" ? "hedge" : "one-way"} position mode for ${category} contracts.`);
+    }
+    if (req.positionSide && this.knownPositionMode(category) === "one_way") notes.push("positionSide was ignored: the account is in one-way mode.");
     return this.resultFor(category, symbol, r.result.orderId, posIdx, notes.join(" ") || null);
+  }
+
+  // --- position mode (one-way vs hedge), learned from order responses and positions ---
+
+  private knownPositionMode(category: Category): PositionMode | null {
+    const modes = (this.ctx.meta.positionMode ?? {}) as Partial<Record<Category, PositionMode>>;
+    return modes[category] ?? null;
+  }
+
+  private rememberPositionMode(category: Category, mode: PositionMode): void {
+    if (this.knownPositionMode(category) === mode) return;
+    const modes = { ...((this.ctx.meta.positionMode ?? {}) as Record<string, PositionMode>), [category]: mode };
+    this.ctx.meta.positionMode = modes;
+    this.ctx.saveMeta?.(this.ctx.meta);
+  }
+
+  /** positionIdx for an order: 0 in one-way mode; 1 (long) / 2 (short) in hedge mode. */
+  private positionIdxFor(category: Category, req: PlaceOrderRequest, mode: PositionMode | null): number {
+    if (mode !== "hedge") {
+      // Unknown mode: an explicit positionSide hints at hedge mode, otherwise assume one-way.
+      if (mode === null && req.positionSide) return req.positionSide === "long" ? 1 : 2;
+      return 0;
+    }
+    if (req.positionSide) return req.positionSide === "long" ? 1 : 2;
+    const opensLong = req.side === "buy";
+    // reduce-only buys close a short (idx 2), reduce-only sells close a long (idx 1)
+    return req.reduceOnly ? (opensLong ? 2 : 1) : opensLong ? 1 : 2;
   }
 
   /** Find an open order by id (or client id) across all categories. */

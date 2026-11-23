@@ -461,7 +461,7 @@ export function registerTools(server: McpServer, ctx: AppContext, caller: McpCal
         take_profit: price.optional().describe("Take-profit price for the resulting position."),
         trailing_stop_distance: price.optional().describe("Trailing stop distance in price units (platforms with trailingStop)."),
         guaranteed_stop: z.boolean().optional().describe("Use a guaranteed stop (platforms with guaranteedStop; may cost a premium)."),
-        position_side: z.enum(["long", "short"]).optional().describe("Hedge-mode accounts only: which position this order belongs to."),
+        position_side: z.enum(["long", "short"]).optional().describe("Optional, hedge-mode accounts only (see position_mode in get_account): which position the order belongs to. Usually unnecessary: the side is derived automatically and it is ignored on one-way accounts."),
         client_order_id: z.string().max(36).optional(),
       },
     },
