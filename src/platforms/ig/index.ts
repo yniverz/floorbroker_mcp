@@ -366,8 +366,26 @@ class IgClient implements PlatformClient {
         const epic = d.instrument?.epic;
         if (!epic) continue;
         this.factsCache.set(epic, { facts: instrumentFacts(d, accountType), at: now });
-        out.push(toQuote(d, now));
+        const q = toQuote(d, now);
+        // IG can return a market without prices (e.g. an epic not offered on this account type).
+        if (q.bid === null && q.ask === null && q.last === null) q.status = "unknown";
+        out.push(q);
       }
+    }
+    const missing = epics.filter((e) => !out.some((q) => q.instrumentId === e));
+    const unpriced = out.filter((q) => q.status === "unknown").map((q) => q.instrumentId);
+    if (out.length === 0 || unpriced.length === out.length) {
+      throw new PlatformError(
+        "not_found",
+        `No prices for ${[...missing, ...unpriced].join(", ")} on this IG account. Check the epic with search_instruments: CFD and spread bet accounts use different epics.`,
+      );
+    }
+    for (const e of missing) {
+      out.push({
+        instrumentId: e, time: Date.now(), bid: null, ask: null, last: null, mark: null, index: null, high24h: null, low24h: null,
+        changePct24h: null, volume24h: null, openInterest: null, fundingRate: null, nextFundingTime: null, status: "unknown",
+        greeks: null, underlyingPrice: null,
+      });
     }
     return out;
   }

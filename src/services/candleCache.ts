@@ -45,14 +45,14 @@ export class CandleCache {
     const now = Date.now();
     let to = Math.min(req.to ?? now, now);
     let from = req.from ?? to - req.limit * step;
-    // Align to candle boundaries (exact for intraday and daily candles in UTC).
-    if (step <= RESOLUTION_MS["1d"]) from = Math.floor(from / step) * step;
     if (from >= to) throw new PlatformError("invalid_request", "`from` must be before `to`.");
     // Do not let a single request span an absurd number of candles.
     if ((to - from) / step > req.limit) {
       if (req.from !== undefined && req.to === undefined) to = Math.min(now, from + req.limit * step);
       else from = to - req.limit * step;
     }
+    // Align to candle boundaries (exact for intraday and daily candles in UTC), after applying the limit.
+    if (step <= RESOLUTION_MS["1d"]) from = Math.floor(from / step) * step;
 
     const key = client.marketDataKey();
     const missing = req.cacheOnly ? [] : this.missingRanges(key, req.instrumentId, req.resolution, from, to);
