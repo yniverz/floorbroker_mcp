@@ -170,6 +170,13 @@ svg.chart .hit { fill: transparent; }
 svg.chart .hit:hover { fill: var(--chart-line); }
 svg.chart .bar-pos { fill: var(--pos); }
 svg.chart .bar-neg { fill: var(--neg); }
+/* Total card: numbers left, mini chart right; the chart hides when the card is too narrow. */
+.total-row { display: flex; align-items: center; gap: 28px; container-type: inline-size; }
+.total-row .stats { flex: 0 0 auto; margin-bottom: 0; }
+.mini { flex: 1 1 260px; min-width: 220px; max-width: 560px; margin-left: auto; display: flex; flex-direction: column; gap: 4px; }
+.mini .muted { text-align: right; }
+svg.chart.mini-chart { height: 96px; }
+@container (max-width: 980px) { .mini { display: none; } }
 svg.spark path { fill: none; stroke-width: 1.6; }
 svg.spark.up path { stroke: var(--pos); }
 svg.spark.down path { stroke: var(--neg); }

@@ -166,3 +166,37 @@ export function sparkline(points: Point[]): Html {
   const up = vs[vs.length - 1]! >= vs[0]!;
   return raw(`<svg class="spark ${up ? "up" : "down"}" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" aria-hidden="true"><path d="${d}"/></svg>`);
 }
+
+/**
+ * Compact area chart without axes (e.g. next to summary numbers). Same split as the
+ * big charts: shapes stretch in an inner SVG, hover dots stay round in the outer one.
+ */
+export function miniChart(points: Point[], opts: { unit?: string } = {}): Html {
+  if (points.length < 2) return raw("");
+  const MW = 400;
+  const MH = 96;
+  const pad = 4;
+  const t0 = points[0]!.t;
+  const t1 = points[points.length - 1]!.t;
+  const vs = points.map((p) => p.v);
+  const min = Math.min(...vs);
+  const max = Math.max(...vs);
+  const x = (t: number) => ((t - t0) / Math.max(1, t1 - t0)) * MW;
+  const y = (v: number) => pad + (1 - (v - min) / Math.max(1e-12, max - min)) * (MH - 2 * pad);
+  const line = points.map((p, i) => `${i ? "L" : "M"}${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join("");
+  const area = `${line}L${MW},${MH}L0,${MH}Z`;
+  const up = vs[vs.length - 1]! >= vs[0]!;
+  const step = Math.max(1, Math.floor(points.length / 60));
+  const dots = points
+    .filter((_, i) => i % step === 0 || i === points.length - 1)
+    .map(
+      (p) =>
+        `<circle cx="${((x(p.t) / MW) * 100).toFixed(3)}%" cy="${y(p.v).toFixed(1)}" r="4" class="hit"><title>${esc(new Date(p.t).toISOString().slice(0, 16).replace("T", " "))}  ${esc(fmtNum(p.v, 2))}${opts.unit ? " " + esc(opts.unit) : ""}</title></circle>`,
+    )
+    .join("");
+  return raw(
+    `<svg class="chart mini-chart ${up ? "up" : "down"}" width="100%" height="${MH}" role="img">` +
+      `<svg x="0" y="0" width="100%" height="${MH}" viewBox="0 0 ${MW} ${MH}" preserveAspectRatio="none" overflow="visible"><path d="${area}" class="area"/><path d="${line}" class="line"/></svg>` +
+      `${dots}</svg>`,
+  );
+}

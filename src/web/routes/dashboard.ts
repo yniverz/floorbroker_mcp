@@ -2,7 +2,7 @@ import { Router } from "express";
 import type { AppContext } from "../../context.js";
 import { getPlatform } from "../../platforms/registry.js";
 import type { PlatformAccountRow } from "../../repos/accounts.js";
-import { lineChart, sparkline, type Point } from "../charts.js";
+import { lineChart, miniChart, sparkline, type Point } from "../charts.js";
 import { fmtAgo, fmtMoney, fmtSigned, html, type Html } from "../html.js";
 import { envBadges, pageOpts, send } from "../layout.js";
 import { summarizeCall } from "./activity.js";
@@ -30,7 +30,7 @@ export function rangeTabs(current: string, hrefFor: (k: string) => string): Html
 }
 
 /** Sum of several accounts' equity over time, forward-filling each account's last snapshot. */
-export function combinedSeries(ctx: AppContext, accountIds: string[], from: number, to: number, buckets = 200): Point[] {
+export function combinedSeries(ctx: AppContext, accountIds: string[], from: number, to: number, buckets = 200, weights?: number[]): Point[] {
   const series = accountIds.map((id) => ctx.pnl.snapshots(id, from, to, buckets * 2));
   const starts = series.map((s) => s[0]?.ts ?? Infinity);
   const t0 = Math.max(from, Math.min(...starts));
@@ -45,7 +45,7 @@ export function combinedSeries(ctx: AppContext, accountIds: string[], from: numb
       while (idx[k]! + 1 < s.length && s[idx[k]! + 1]!.ts <= t) idx[k]!++;
       const snap = s[idx[k]!];
       if (snap && snap.ts <= t) {
-        sum += snap.equity;
+        sum += snap.equity * (weights?.[k] ?? 1);
         any = true;
       }
     });
@@ -122,17 +122,32 @@ export function dashboardRouter(ctx: AppContext): Router {
         }
         return s;
       };
+      // Total equity over time: each account converted at the current rate (history uses today's rate).
+      const ids: string[] = [];
+      const weights: number[] = [];
+      for (const a of accounts) {
+        const c = ctx.pnl.latestSnapshot(a.id)?.currency ?? a.currency;
+        const w = rates && c ? convert(rates, 1, c, ccy) : null;
+        if (w !== null) {
+          ids.push(a.id);
+          weights.push(w);
+        }
+      }
+      const totalSeries = ids.length ? combinedSeries(ctx, ids, range.from, range.to, 120, weights) : [];
       const usd = rates?.perEur.USD;
       const rateNote = !rates
         ? "Exchange rates are unavailable right now."
         : `Converted with ECB reference rates${rates.date ? ` of ${rates.date}` : ""}${usd ? ` (1 EUR = ${usd} USD)` : ""}; USDT/USDC count as USD.`;
       total = html`<section class="card">
         <div class="card-head"><h2>Total · ${accounts.length} account${accounts.length === 1 ? "" : "s"} · in ${ccy}</h2></div>
+        <div class="total-row">
         <div class="stats">
           <div><span class="muted">Equity</span><strong>${fmtMoney(sum((g) => g.equity), ccy)}</strong></div>
           <div><span class="muted">Unrealized PnL</span><strong>${fmtSigned(sum((g) => g.unrealized), ccy)}</strong></div>
           <div><span class="muted">Change (${RANGES[range.key]!.label})</span><strong>${fmtSigned(sum((g) => g.change), ccy)}</strong></div>
           <div><span class="muted">Realized PnL (${RANGES[range.key]!.label})</span><strong>${fmtSigned(sum((g) => g.realized), ccy)}</strong></div>
+        </div>
+        ${totalSeries.length > 1 ? html`<div class="mini"><span class="muted small">Total equity (${RANGES[range.key]!.label})</span>${miniChart(totalSeries, { unit: ccy })}</div>` : ""}
         </div>
         <p class="muted small">${rateNote}</p>
       </section>`;
