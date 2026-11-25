@@ -6,6 +6,7 @@ import { lineChart, sparkline, type Point } from "../charts.js";
 import { fmtAgo, fmtMoney, fmtSigned, html, type Html } from "../html.js";
 import { envBadges, pageOpts, send } from "../layout.js";
 import { summarizeCall } from "./activity.js";
+import { convert, fxRates } from "../../services/fx.js";
 
 export const RANGES: Record<string, { label: string; ms: number | null }> = {
   "1d": { label: "24h", ms: 86_400_000 },
@@ -63,7 +64,7 @@ function changeOver(ctx: AppContext, a: PlatformAccountRow, ms: number): number 
 export function dashboardRouter(ctx: AppContext): Router {
   const router = Router();
 
-  router.get("/", (req, res) => {
+  router.get("/", async (req, res) => {
     const user = req.webUser!;
     const range = rangeFrom(String(req.query.range ?? "7d"));
     const accounts = ctx.accounts.listForUser(user.id).filter((a) => a.is_active === 1);
@@ -82,12 +83,14 @@ export function dashboardRouter(ctx: AppContext): Router {
     }
     const sortedGroups = [...groups.values()].sort((x, y) => Number(y.live) - Number(x.live));
 
+    const groupTotals: { currency: string; equity: number; unrealized: number; change: number | null; realized: number }[] = [];
     const summary = sortedGroups.map((g) => {
       const equity = g.accounts.reduce((s, a) => s + (ctx.pnl.latestSnapshot(a.id)?.equity ?? 0), 0);
       const unrealized = g.accounts.reduce((s, a) => s + (ctx.pnl.latestSnapshot(a.id)?.unrealized_pnl ?? 0), 0);
       const series = combinedSeries(ctx, g.accounts.map((a) => a.id), range.from, range.to);
       const change = series.length > 1 ? series[series.length - 1]!.v - series[0]!.v : null;
       const realized = g.accounts.reduce((s, a) => s + ctx.pnl.realizedSum(a.id, range.from, range.to).pnl, 0);
+      groupTotals.push({ currency: g.currency, equity, unrealized, change, realized });
       return html`<section class="card">
         <div class="card-head">
           <h2><span class="badge ${g.live ? "live" : "demo"}">${g.live ? "LIVE" : "DEMO"}</span> ${g.currency} · ${g.accounts.length} account${g.accounts.length === 1 ? "" : "s"}</h2>
@@ -101,6 +104,39 @@ export function dashboardRouter(ctx: AppContext): Router {
         ${lineChart(series, { unit: g.currency, emptyText: "Equity history appears after the first snapshots" })}
       </section>`;
     });
+
+    // Total across all groups, converted into the display currency.
+    let total: Html | string = "";
+    if (groupTotals.length > 1) {
+      const ccy = ctx.config.displayCurrency;
+      const rates = await fxRates();
+      const sum = (pick: (g: (typeof groupTotals)[number]) => number | null): number | null => {
+        if (!rates) return null;
+        let s = 0;
+        for (const g of groupTotals) {
+          const v = pick(g);
+          if (v === null) continue;
+          const c = convert(rates, v, g.currency, ccy);
+          if (c === null) return null;
+          s += c;
+        }
+        return s;
+      };
+      const usd = rates?.perEur.USD;
+      const rateNote = !rates
+        ? "Exchange rates are unavailable right now."
+        : `Converted with ECB reference rates${rates.date ? ` of ${rates.date}` : ""}${usd ? ` (1 EUR = ${usd} USD)` : ""}; USDT/USDC count as USD.`;
+      total = html`<section class="card">
+        <div class="card-head"><h2>Total · ${accounts.length} account${accounts.length === 1 ? "" : "s"} · in ${ccy}</h2></div>
+        <div class="stats">
+          <div><span class="muted">Equity</span><strong>${fmtMoney(sum((g) => g.equity), ccy)}</strong></div>
+          <div><span class="muted">Unrealized PnL</span><strong>${fmtSigned(sum((g) => g.unrealized), ccy)}</strong></div>
+          <div><span class="muted">Change (${RANGES[range.key]!.label})</span><strong>${fmtSigned(sum((g) => g.change), ccy)}</strong></div>
+          <div><span class="muted">Realized PnL (${RANGES[range.key]!.label})</span><strong>${fmtSigned(sum((g) => g.realized), ccy)}</strong></div>
+        </div>
+        <p class="muted small">${rateNote}</p>
+      </section>`;
+    }
 
     const cards = accounts.map((a) => {
       const snap = ctx.pnl.latestSnapshot(a.id);
@@ -143,6 +179,7 @@ export function dashboardRouter(ctx: AppContext): Router {
             </ol>
           </section>`
         : ""}
+      ${total}
       ${summary}
       ${accounts.length > 0 ? html`<h2 class="section">Accounts</h2><div class="acct-grid">${cards}</div>` : ""}
       <h2 class="section">Recent agent trading actions <span class="muted small">· last 24h: ${counts.calls} tool calls, ${counts.trades} trading actions, ${counts.errors} errors</span></h2>

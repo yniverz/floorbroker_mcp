@@ -65,6 +65,7 @@ export interface Config {
   snapshotIntervalMs: number;
   pnlSyncIntervalMs: number;
   toolLogRetentionDays: number;
+  displayCurrency: string;
   logLevel: string;
   outboundProxy: string | null;
   outboundProxyPlatforms: string[];
@@ -123,6 +124,7 @@ export function loadConfig(): Config {
     snapshotIntervalMs: int("SNAPSHOT_INTERVAL_MIN", 5) * 60_000,
     pnlSyncIntervalMs: int("PNL_SYNC_INTERVAL_MIN", 15) * 60_000,
     toolLogRetentionDays: int("TOOL_LOG_RETENTION_DAYS", 365),
+    displayCurrency: env("DISPLAY_CURRENCY", "EUR").toUpperCase(),
     logLevel: env("LOG_LEVEL", "info"),
     outboundProxy: proxyUrl(process.env.OUTBOUND_PROXY),
     outboundProxyVia: process.env.OUTBOUND_PROXY_VIA || null,

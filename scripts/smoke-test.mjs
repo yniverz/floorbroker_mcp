@@ -151,8 +151,21 @@ try {
     userId: admin.id, platform: "bybit", label: "Smoke Bybit", environment: "live", agentEnvironment: "demo",
     credentials: { apiKey: "dummy", apiSecret: "dummy", region: "global" }, meta: {}, externalId: null, description: "smoke", currency: "USD", canTrade: true,
   });
+  // A second account in EUR plus balance snapshots, so the dashboard shows two currency groups and a total.
+  const { PnlRepo } = await import(path.resolve("dist/repos/pnl.js"));
+  const accounts = new AccountRepo(db, cfg.encryptionKey);
+  const acct2 = accounts.create({
+    userId: admin.id, platform: "bybit", label: "Smoke EUR", environment: "demo", agentEnvironment: "demo",
+    credentials: { apiKey: "dummy2", apiSecret: "dummy2", region: "global" }, meta: {}, externalId: null, description: "smoke", currency: "EUR", canTrade: false,
+  });
+  const pnlRepo = new PnlRepo(db);
+  const now = Date.now();
+  pnlRepo.addSnapshot({ account_id: acct.id, ts: now - 3600_000, currency: "USD", equity: 110, balance: 110, unrealized_pnl: 0, positions: 0 });
+  pnlRepo.addSnapshot({ account_id: acct.id, ts: now, currency: "USD", equity: 109, balance: 108, unrealized_pnl: 1, positions: 1 });
+  pnlRepo.addSnapshot({ account_id: acct2.id, ts: now - 3600_000, currency: "EUR", equity: 500, balance: 500, unrealized_pnl: 0, positions: 0 });
+  pnlRepo.addSnapshot({ account_id: acct2.id, ts: now, currency: "EUR", equity: 505, balance: 503, unrealized_pnl: 2, positions: 1 });
   db.close();
-  check(!!acct.id, "account row created");
+  check(!!acct.id && !!acct2.id, "account rows and snapshots created");
 
   // Authorization code + PKCE
   const verifier = randomBytes(32).toString("base64url");
@@ -250,6 +263,10 @@ try {
   }
   const addPage = await (await web("/accounts/new?platform=bybit")).text();
   check(/sees this server as <code>[0-9a-f.:]+<\/code> \(via outbound proxy/.test(addPage), "Bybit add page shows egress IP via proxy");
+  const dash = await (await web("/")).text();
+  const totalEq = /Total · 2 accounts · in EUR[\s\S]*?Equity<\/span><strong>([0-9.,]+) EUR/.exec(dash)?.[1];
+  const totalVal = totalEq ? Number(totalEq.replace(/,/g, "")) : NaN;
+  check(totalVal > 590 && totalVal < 620 && dash.includes("ECB reference rates"), "dashboard total converts USD + EUR into EUR", totalEq);
   const act = await (await web("/activity")).text();
   check(act.includes("get_candles"), "activity log records tool calls");
 } catch (err) {
