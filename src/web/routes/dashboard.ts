@@ -84,6 +84,7 @@ export function dashboardRouter(ctx: AppContext): Router {
 
     const summary = sortedGroups.map((g) => {
       const equity = g.accounts.reduce((s, a) => s + (ctx.pnl.latestSnapshot(a.id)?.equity ?? 0), 0);
+      const unrealized = g.accounts.reduce((s, a) => s + (ctx.pnl.latestSnapshot(a.id)?.unrealized_pnl ?? 0), 0);
       const series = combinedSeries(ctx, g.accounts.map((a) => a.id), range.from, range.to);
       const change = series.length > 1 ? series[series.length - 1]!.v - series[0]!.v : null;
       const realized = g.accounts.reduce((s, a) => s + ctx.pnl.realizedSum(a.id, range.from, range.to).pnl, 0);
@@ -93,6 +94,7 @@ export function dashboardRouter(ctx: AppContext): Router {
         </div>
         <div class="stats">
           <div><span class="muted">Equity</span><strong>${fmtMoney(equity, g.currency)}</strong></div>
+          <div><span class="muted">Unrealized PnL</span><strong>${fmtSigned(unrealized, g.currency)}</strong></div>
           <div><span class="muted">Change (${RANGES[range.key]!.label})</span><strong>${fmtSigned(change, g.currency)}</strong></div>
           <div><span class="muted">Realized PnL (${RANGES[range.key]!.label})</span><strong>${fmtSigned(realized, g.currency)}</strong></div>
         </div>
