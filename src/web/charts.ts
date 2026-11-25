@@ -24,6 +24,33 @@ function niceTicks(min: number, max: number, count = 4): number[] {
   return ticks;
 }
 
+/** Horizontal position in the outer (unscaled) SVG, as a percentage of the chart width. */
+function pct(x: number): string {
+  return `${((x / W) * 100).toFixed(3)}%`;
+}
+
+/** Extends ticks by whole steps until they cover [lo, hi] (niceTicks only returns ticks inside the range). */
+function coveringTicks(lo: number, hi: number): number[] {
+  const ticks = niceTicks(lo, hi);
+  const step = ticks.length > 1 ? ticks[1]! - ticks[0]! : Math.abs(hi - lo) || Math.abs(lo) * 0.01 || 1;
+  while (ticks[0]! > lo) ticks.unshift(Number((ticks[0]! - step).toPrecision(12)));
+  while (ticks[ticks.length - 1]! < hi) ticks.push(Number((ticks[ticks.length - 1]! + step).toPrecision(12)));
+  return ticks;
+}
+
+/**
+ * Shapes (grid, area, line, bars) live in an inner SVG that stretches with the
+ * container (viewBox + preserveAspectRatio="none"); text and hover dots live in the
+ * outer SVG with percentage x positions, so they are never distorted.
+ */
+function frame(cls: string, shapes: string, overlay: string): Html {
+  return raw(
+    `<svg class="${cls}" width="100%" height="${H}" role="img">` +
+      `<svg x="0" y="0" width="100%" height="${H}" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" overflow="visible">${shapes}</svg>` +
+      `${overlay}</svg>`,
+  );
+}
+
 function timeLabel(t: number, span: number): string {
   const d = new Date(t);
   if (span <= 2 * 86_400_000) return d.toISOString().slice(11, 16);
@@ -33,7 +60,7 @@ function timeLabel(t: number, span: number): string {
 
 function empty(message: string): Html {
   return raw(
-    `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img"><text x="${W / 2}" y="${H / 2}" text-anchor="middle" class="axis">${esc(message)}</text></svg>`,
+    `<svg class="chart" width="100%" height="${H}" role="img"><text x="50%" y="${H / 2}" text-anchor="middle" class="axis">${esc(message)}</text></svg>`,
   );
 }
 
@@ -59,12 +86,15 @@ export function lineChart(points: Point[], opts: { unit?: string; emptyText?: st
   const area = `${line}L${x(t1).toFixed(1)},${(H - PAD.b).toFixed(1)}L${x(t0).toFixed(1)},${(H - PAD.b).toFixed(1)}Z`;
   const rising = points[points.length - 1]!.v >= points[0]!.v;
   const grid = ticks
-    .map((v) => `<line x1="${PAD.l}" x2="${W - PAD.r}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" class="grid"/><text x="${PAD.l - 6}" y="${(y(v) + 4).toFixed(1)}" text-anchor="end" class="axis">${esc(fmtNum(v, Math.abs(max - min) < 10 ? 2 : 0))}</text>`)
+    .map((v) => `<line x1="${PAD.l}" x2="${W - PAD.r}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" class="grid"/>`)
+    .join("");
+  const yLabels = ticks
+    .map((v) => `<text x="${pct(PAD.l - 6)}" y="${(y(v) + 4).toFixed(1)}" text-anchor="end" class="axis">${esc(fmtNum(v, Math.abs(max - min) < 10 ? 2 : 0))}</text>`)
     .join("");
   const xt = [0, 0.25, 0.5, 0.75, 1]
     .map((f) => {
       const t = t0 + f * (t1 - t0);
-      return `<text x="${x(t).toFixed(1)}" y="${H - 6}" text-anchor="${f === 0 ? "start" : f === 1 ? "end" : "middle"}" class="axis">${esc(timeLabel(t, t1 - t0))}</text>`;
+      return `<text x="${pct(x(t))}" y="${H - 6}" text-anchor="${f === 0 ? "start" : f === 1 ? "end" : "middle"}" class="axis">${esc(timeLabel(t, t1 - t0))}</text>`;
     })
     .join("");
   const step = Math.max(1, Math.floor(points.length / 120));
@@ -72,15 +102,17 @@ export function lineChart(points: Point[], opts: { unit?: string; emptyText?: st
     .filter((_, i) => i % step === 0 || i === points.length - 1)
     .map(
       (p) =>
-        `<circle cx="${x(p.t).toFixed(1)}" cy="${y(p.v).toFixed(1)}" r="5" class="hit"><title>${esc(new Date(p.t).toISOString().slice(0, 16).replace("T", " "))}  ${esc(fmtNum(p.v, 2))}${opts.unit ? " " + esc(opts.unit) : ""}</title></circle>`,
+        `<circle cx="${pct(x(p.t))}" cy="${y(p.v).toFixed(1)}" r="5" class="hit"><title>${esc(new Date(p.t).toISOString().slice(0, 16).replace("T", " "))}  ${esc(fmtNum(p.v, 2))}${opts.unit ? " " + esc(opts.unit) : ""}</title></circle>`,
     )
     .join("");
   const baseline =
     opts.baseline !== undefined
       ? `<line x1="${PAD.l}" x2="${W - PAD.r}" y1="${y(opts.baseline).toFixed(1)}" y2="${y(opts.baseline).toFixed(1)}" class="baseline"/>`
       : "";
-  return raw(
-    `<svg class="chart ${rising ? "up" : "down"}" viewBox="0 0 ${W} ${H}" role="img" preserveAspectRatio="none">${grid}${baseline}<path d="${area}" class="area"/><path d="${line}" class="line"/>${dots}${xt}</svg>`,
+  return frame(
+    `chart ${rising ? "up" : "down"}`,
+    `${grid}${baseline}<path d="${area}" class="area"/><path d="${line}" class="line"/>`,
+    `${yLabels}${dots}${xt}`,
   );
 }
 
@@ -88,7 +120,7 @@ export function lineChart(points: Point[], opts: { unit?: string; emptyText?: st
 export function barChart(points: Point[], opts: { unit?: string; emptyText?: string } = {}): Html {
   if (points.length === 0) return empty(opts.emptyText ?? "No closed trades in this range");
   const values = points.map((p) => p.v);
-  const ticks = niceTicks(Math.min(0, ...values), Math.max(0, ...values));
+  const ticks = coveringTicks(Math.min(0, ...values), Math.max(0, ...values));
   const min = ticks[0]!;
   const max = ticks[ticks.length - 1]!;
   const y = (v: number) => PAD.t + (1 - (v - min) / Math.max(1e-12, max - min)) * (H - PAD.t - PAD.b);
@@ -96,7 +128,10 @@ export function barChart(points: Point[], opts: { unit?: string; emptyText?: str
   const slot = (W - PAD.l - PAD.r) / n;
   const bw = Math.max(2, Math.min(28, slot * 0.7));
   const grid = ticks
-    .map((v) => `<line x1="${PAD.l}" x2="${W - PAD.r}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" class="grid"/><text x="${PAD.l - 6}" y="${(y(v) + 4).toFixed(1)}" text-anchor="end" class="axis">${esc(fmtNum(v, Math.abs(max - min) < 10 ? 2 : 0))}</text>`)
+    .map((v) => `<line x1="${PAD.l}" x2="${W - PAD.r}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" class="grid"/>`)
+    .join("");
+  const yLabels = ticks
+    .map((v) => `<text x="${pct(PAD.l - 6)}" y="${(y(v) + 4).toFixed(1)}" text-anchor="end" class="axis">${esc(fmtNum(v, Math.abs(max - min) < 10 ? 2 : 0))}</text>`)
     .join("");
   const bars = points
     .map((p, i) => {
@@ -109,10 +144,10 @@ export function barChart(points: Point[], opts: { unit?: string; emptyText?: str
   const labelEvery = Math.max(1, Math.ceil(n / 6));
   const xt = points
     .map((p, i) =>
-      i % labelEvery === 0 ? `<text x="${(PAD.l + slot * i + slot / 2).toFixed(1)}" y="${H - 6}" text-anchor="middle" class="axis">${esc(new Date(p.t).toISOString().slice(5, 10))}</text>` : "",
+      i % labelEvery === 0 ? `<text x="${pct(PAD.l + slot * i + slot / 2)}" y="${H - 6}" text-anchor="middle" class="axis">${esc(new Date(p.t).toISOString().slice(5, 10))}</text>` : "",
     )
     .join("");
-  return raw(`<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" preserveAspectRatio="none">${grid}${bars}${xt}</svg>`);
+  return frame("chart", `${grid}${bars}`, `${yLabels}${xt}`);
 }
 
 /** Tiny inline trend line for account cards. */
