@@ -45,6 +45,11 @@ export function usesProxy(platform: string | undefined): boolean {
   return !!proxy && !!platform && (proxy.platforms.has("*") || proxy.platforms.has(platform.toLowerCase()));
 }
 
+/** undici dispatcher routing a platform through OUTBOUND_PROXY, if configured for it (used for WebSockets). */
+export function dispatcherFor(platform: string): ProxyAgent | undefined {
+  return usesProxy(platform) ? proxy!.agent : undefined;
+}
+
 /** Proxy URL without credentials, for display. */
 export function proxyLabel(): string | null {
   if (!proxy) return null;

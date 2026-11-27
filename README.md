@@ -221,6 +221,28 @@ be edited (accounts, permission, limits) or revoked at any time under **Agents**
 
 ---
 
+## Live data streams
+
+Adapters can offer a live stream (`PlatformClient.stream()`), used through floorbroker's
+`StreamService`. It is the foundation for server-side strategies (in progress) and needs no
+configuration: a stream connects on the first subscription and closes when nothing is subscribed.
+
+| | Bybit | IG |
+|---|---|---|
+| Transport | WebSockets (`stream.bybit.com`, one per category) | Lightstreamer text protocol over HTTP streaming |
+| Prices | `tickers.<symbol>` (bid/ask/last) | `PRICE:<accountId>:<epic>` via the `Pricing` adapter |
+| Candles | `kline.<interval>.<symbol>`, all intervals | `CHART:<epic>:1MINUTE / 5MINUTE / HOUR` |
+| Own orders, fills, positions | private WebSocket (`order`, `execution`, `position`) | `TRADE:<accountId>` (OPU / WOU / CONFIRMS) |
+
+- **Shared subscriptions:** several subscribers to the same topic share one platform subscription.
+- **Reconnects:** with backoff and full resubscription. IG rebinds on `LOOP` and logs in again when the session tokens expire.
+- **Completed candles go into the candle cache,** so live history is free (IG's weekly price allowance is not touched).
+- **Aggregation:** resolutions a platform does not stream natively are built from smaller candles in UTC buckets (e.g. IG 15m from 5m, 4h from 1h; up to 12h).
+- **Account switches:** when an account's credentials or settings change, its subscriptions move to the new client automatically.
+- **Status:** the account page shows a "Live stream" line while something is subscribed.
+- **Check tool:** `node dist/tools/streamCheck.js <account-id> <instrument-id> [resolution] [seconds] [--account-events]` is a read-only check that subscribes and prints what arrives.
+- **Proxy:** Bybit's private stream uses the IP-bound API key, so it leaves through `OUTBOUND_PROXY` like REST calls. The proxy must allow the stream hosts (`stream.bybit.com`, `stream-demo.bybit.com`, `stream-testnet.bybit.com`). Public market data connects directly.
+
 ## Adding a platform
 
 1. Create `src/platforms/<name>/` exporting a `PlatformDefinition` (see [src/platforms/types.ts](src/platforms/types.ts)):

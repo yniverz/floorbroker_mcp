@@ -64,6 +64,8 @@ export interface IgSession {
   accountType: string | null;
   accounts: IgAccountRef[];
   trailingStopsEnabled: boolean | null;
+  /** Lightstreamer server for this session (from the login response). */
+  lightstreamerEndpoint: string | null;
   lastUsed: number;
 }
 
@@ -108,6 +110,16 @@ export class IgHttp {
   }
 
   /** Current session, logging in if needed. */
+  /**
+   * Credentials for the Lightstreamer price/trade stream. `fresh` forces a new login
+   * (used when the stream rejects expired tokens).
+   */
+  async streamCredentials(fresh = false): Promise<{ endpoint: string; accountId: string; password: string }> {
+    const s = fresh ? await this.login() : await this.getSession();
+    if (!s.lightstreamerEndpoint) throw new PlatformError("platform_error", "IG login returned no lightstreamerEndpoint.");
+    return { endpoint: s.lightstreamerEndpoint, accountId: s.accountId, password: `CST-${s.cst}|XST-${s.xst}` };
+  }
+
   async getSession(): Promise<IgSession> {
     const s = this.session;
     if (s && Date.now() - s.lastUsed < SESSION_IDLE_MS) return s;
@@ -204,6 +216,7 @@ export class IgHttp {
       accountType,
       accounts,
       trailingStopsEnabled: typeof body.trailingStopsEnabled === "boolean" ? body.trailingStopsEnabled : null,
+      lightstreamerEndpoint: typeof body.lightstreamerEndpoint === "string" ? body.lightstreamerEndpoint : null,
       lastUsed: Date.now(),
     };
     this.session = session;
@@ -253,6 +266,7 @@ export class IgHttp {
 
 interface LoginResponse {
   currentAccountId?: string;
+  lightstreamerEndpoint?: string;
   accountType?: string;
   trailingStopsEnabled?: boolean;
   accounts?: { accountId?: string; accountName?: string; accountType?: string; preferred?: boolean }[];

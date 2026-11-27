@@ -8,6 +8,7 @@ import { PnlRepo } from "./repos/pnl.js";
 import { UserRepo, WebSessionRepo } from "./repos/users.js";
 import { AccountService, SqliteQuotaStore } from "./services/accountService.js";
 import { CandleCache } from "./services/candleCache.js";
+import { StreamService } from "./services/streams.js";
 import { SyncService } from "./services/sync.js";
 
 export interface AppContext {
@@ -24,12 +25,14 @@ export interface AppContext {
   accountService: AccountService;
   candles: CandleCache;
   sync: SyncService;
+  streams: StreamService;
 }
 
 export function createContext(config: Config, db: Db, marketDb: Db): AppContext {
   const accounts = new AccountRepo(db, config.encryptionKey);
   const pnl = new PnlRepo(db);
   const accountService = new AccountService(accounts, new SqliteQuotaStore(marketDb));
+  const candles = new CandleCache(marketDb);
   return {
     config,
     db,
@@ -42,7 +45,8 @@ export function createContext(config: Config, db: Db, marketDb: Db): AppContext 
     activity: new ActivityRepo(db),
     pnl,
     accountService,
-    candles: new CandleCache(marketDb),
+    candles,
     sync: new SyncService(accounts, pnl, accountService, config.snapshotIntervalMs, config.pnlSyncIntervalMs),
+    streams: new StreamService(accounts, accountService, candles),
   };
 }

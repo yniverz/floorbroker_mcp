@@ -462,6 +462,69 @@ export interface PlatformClient {
   setPositionProtection?(req: PositionProtectionRequest): Promise<Position | null>;
   setLeverage?(p: { instrumentId: string; leverage: number }): Promise<{ leverage: number }>;
 
+  /**
+   * Live data stream for this account (prices and the account's own order/fill/position
+   * events). Created lazily and owned by the client; the same instance is returned on
+   * every call. Absent on platforms without streaming.
+   */
+  stream?(): PlatformStream;
+
   /** Release sessions/timers. */
   close?(): Promise<void>;
+}
+
+// ---------------------------------------------------------------------------
+// Streaming
+// ---------------------------------------------------------------------------
+
+export interface Tick {
+  instrumentId: string;
+  time: number;
+  bid: number | null;
+  ask: number | null;
+  last: number | null;
+}
+
+export interface CandleUpdate {
+  instrumentId: string;
+  resolution: Resolution;
+  candle: Candle;
+  /** True once the candle period is complete; earlier updates are provisional. */
+  final: boolean;
+}
+
+export type AccountEvent =
+  | { type: "order"; order: Order }
+  | { type: "fill"; fill: Fill }
+  | { type: "position"; position: Position; closed: boolean };
+
+export interface StreamStatus {
+  connected: boolean;
+  /** When the current connection was established. */
+  since: number | null;
+  lastMessageAt: number | null;
+  reconnects: number;
+  error: string | null;
+  /** Human-readable list of active subscriptions, e.g. "ticks linear:BTCUSDT". */
+  subscriptions: string[];
+}
+
+export type Unsubscribe = () => void;
+
+/**
+ * Rules for adapters:
+ * - Connect lazily on the first subscription; reconnect with backoff on failures and
+ *   resubscribe everything; close the connection when nothing is subscribed any more.
+ * - Callbacks must never throw into the adapter (wrap them); deliver events in order.
+ * - Several subscribers to the same topic share one platform subscription.
+ */
+export interface PlatformStream {
+  /** Candle resolutions the platform streams natively (others are aggregated by the caller). */
+  readonly candleResolutions: Resolution[];
+  subscribeTicks(instrumentId: string, cb: (t: Tick) => void): Unsubscribe;
+  subscribeCandles(instrumentId: string, resolution: Resolution, cb: (c: CandleUpdate) => void): Unsubscribe;
+  /** The account's own orders, fills and positions. */
+  subscribeAccount?(cb: (e: AccountEvent) => void): Unsubscribe;
+  status(): StreamStatus;
+  close(): Promise<void>;
 }

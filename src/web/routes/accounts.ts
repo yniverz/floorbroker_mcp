@@ -3,7 +3,7 @@ import type { AppContext } from "../../context.js";
 import { logger } from "../../logger.js";
 import { egressIp, proxyLabel } from "../../platforms/http.js";
 import { getPlatform, listPlatforms } from "../../platforms/registry.js";
-import type { AgentEnvironment, EnvironmentId, Order, PlatformDefinition, Position } from "../../platforms/types.js";
+import type { AgentEnvironment, EnvironmentId, Order, PlatformDefinition, Position, StreamStatus } from "../../platforms/types.js";
 import type { PlatformAccountRow } from "../../repos/accounts.js";
 import { barChart, lineChart } from "../charts.js";
 import { fmtAgo, fmtMoney, fmtSigned, fmtSmart, fmtTime, html, type Html } from "../html.js";
@@ -104,6 +104,13 @@ function addForm(
       <p class="small muted">Credentials are encrypted at rest (AES-256-GCM). Keys that allow withdrawals are refused.</p>
     </aside>
   </div>`;
+}
+
+function streamLine(s: StreamStatus | null): Html {
+  if (!s || s.subscriptions.length === 0) return html``;
+  return html`<p class="small ${s.connected ? "muted" : "err"}">Live stream: ${s.connected ? "connected" : "disconnected"}
+    · ${s.subscriptions.length} subscription${s.subscriptions.length === 1 ? "" : "s"} (${s.subscriptions.join(", ")})
+    · last data ${fmtAgo(s.lastMessageAt)}${s.reconnects ? ` · ${s.reconnects} reconnects` : ""}${s.error && !s.connected ? ` · ${s.error}` : ""}</p>`;
 }
 
 function positionsTable(rows: Position[]): Html {
@@ -299,6 +306,7 @@ export function accountsRouter(ctx: AppContext): Router {
         ${lineChart(equity, { unit: ccy, emptyText: "Equity history appears after the first snapshots" })}
         <p class="muted small">Equity includes deposits and withdrawals. Snapshot every ${Math.round(ctx.config.snapshotIntervalMs / 60000)} min · last ${fmtAgo(latest?.ts)}.
           <form method="post" action="/accounts/${a.id}/refresh" class="inline">${csrfField(req)}<button class="link" type="submit">Refresh now</button></form></p>
+        ${streamLine(ctx.streams.status(a.id))}
         <h3>Daily realized PnL</h3>
         ${barChart(daily, { unit: ccy })}
       </section>

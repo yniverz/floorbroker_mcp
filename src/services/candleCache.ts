@@ -129,6 +129,14 @@ export class CandleCache {
     return out.filter(([a, b]) => b > a);
   }
 
+  /** Stores one completed candle from a live stream and marks its period as covered. */
+  storeStreamCandle(key: string, instrumentId: string, resolution: Resolution, candle: Candle): void {
+    const step = RESOLUTION_MS[resolution];
+    if (candle.t + step > Date.now() + 5_000) return; // not finished yet
+    this.store(key, instrumentId, resolution, [candle]);
+    this.addCoverage(key, instrumentId, resolution, candle.t, candle.t + step);
+  }
+
   private store(key: string, instrumentId: string, resolution: string, candles: Candle[]): void {
     if (candles.length === 0) return;
     const stmt = this.db.prepare(

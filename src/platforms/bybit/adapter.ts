@@ -19,6 +19,7 @@ import type {
   PlaceOrderRequest,
   PlatformClient,
   PlatformClientContext,
+  PlatformStream,
   Position,
   PositionProtectionRequest,
   Quote,
@@ -27,7 +28,9 @@ import type {
   ValidationResult,
 } from "../types.js";
 import { BybitHttp, type BybitHttpOptions, type Params } from "./client.js";
+import { BybitStream, streamHostFor } from "./stream.js";
 import {
+  KLINE_INTERVALS,
   type Category,
   type RawClosedPnl,
   type RawExecution,
@@ -58,21 +61,6 @@ const DAY_MS = 86_400_000;
 const WINDOW_MS = 7 * DAY_MS;
 const MAX_LOOKBACK_MS = 730 * DAY_MS;
 
-const KLINE_INTERVALS: Partial<Record<Resolution, string>> = {
-  "1m": "1",
-  "3m": "3",
-  "5m": "5",
-  "15m": "15",
-  "30m": "30",
-  "1h": "60",
-  "2h": "120",
-  "4h": "240",
-  "6h": "360",
-  "12h": "720",
-  "1d": "D",
-  "1w": "W",
-  "1M": "M",
-};
 
 const ORDERBOOK_MAX: Record<Category, number> = { spot: 200, linear: 500, inverse: 500, option: 25 };
 
@@ -173,12 +161,31 @@ const MARGIN_MODES: Record<string, string> = { REGULAR_MARGIN: "cross", ISOLATED
 
 export class BybitClient implements PlatformClient {
   private readonly http: BybitHttp;
+  private liveStream: BybitStream | null = null;
 
   constructor(
     private readonly ctx: PlatformClientContext,
-    opts: BybitHttpOptions,
+    private readonly opts: BybitHttpOptions,
   ) {
     this.http = new BybitHttp(opts);
+  }
+
+  stream(): PlatformStream {
+    if (!this.liveStream) {
+      this.liveStream = new BybitStream({
+        // Demo trading shares mainnet prices; testnet has its own.
+        publicHost: this.ctx.environment === "testnet" ? "stream-testnet.bybit.com" : "stream.bybit.com",
+        privateUrl: `wss://${streamHostFor(this.opts.host)}/v5/private`,
+        apiKey: this.opts.apiKey,
+        apiSecret: this.opts.apiSecret,
+      });
+    }
+    return this.liveStream;
+  }
+
+  async close(): Promise<void> {
+    await this.liveStream?.close();
+    this.liveStream = null;
   }
 
   marketDataKey(): string {

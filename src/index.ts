@@ -47,6 +47,7 @@ async function main(): Promise<void> {
     logger.info("shutting down", { signal });
     clearInterval(housekeeping);
     ctx.sync.stop();
+    void ctx.streams.closeAll();
     server.close(() => {
       void ctx.accountService.closeAll().finally(() => {
         db.close();

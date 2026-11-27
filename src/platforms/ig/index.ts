@@ -24,6 +24,7 @@ import type {
   PlatformClient,
   PlatformClientContext,
   PlatformDefinition,
+  PlatformStream,
   Position,
   PositionProtectionRequest,
   Quote,
@@ -32,6 +33,7 @@ import type {
   ValidationResult,
 } from "../types.js";
 import { describeAccounts, IgHttp, sha16 } from "./client.js";
+import { IgStream } from "./stream.js";
 import {
   actionStatus,
   cleanSize,
@@ -188,6 +190,7 @@ class IgClient implements PlatformClient {
   private readonly quotaKey: string;
   private readonly configuredAccountId: string | null;
   private readonly factsCache = new Map<string, { facts: IgInstrumentFacts; at: number }>();
+  private liveStream: IgStream | null = null;
 
   constructor(private readonly ctx: PlatformClientContext) {
     const c = ctx.credentials;
@@ -205,6 +208,13 @@ class IgClient implements PlatformClient {
 
   marketDataKey(): string {
     return `ig:${this.env}`;
+  }
+
+  stream(): PlatformStream {
+    if (!this.liveStream) {
+      this.liveStream = new IgStream(`ig-${this.ctx.accountId.slice(0, 8)}`, (fresh) => this.http.streamCredentials(fresh));
+    }
+    return this.liveStream;
   }
 
   private async accountType(): Promise<string | null> {
@@ -1091,6 +1101,8 @@ class IgClient implements PlatformClient {
   }
 
   async close(): Promise<void> {
+    await this.liveStream?.close();
+    this.liveStream = null;
     this.http.logout();
   }
 }

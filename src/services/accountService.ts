@@ -38,6 +38,7 @@ interface CachedClient {
  */
 export class AccountService {
   private clients = new Map<string, CachedClient>();
+  private readonly replacedListeners: ((accountId: string) => void)[] = [];
 
   constructor(
     private readonly accounts: AccountRepo,
@@ -50,10 +51,27 @@ export class AccountService {
     return p;
   }
 
+  /** Called after an account's client was closed and dropped (settings or credentials changed, account removed). */
+  onClientReplaced(cb: (accountId: string) => void): void {
+    this.replacedListeners.push(cb);
+  }
+
+  private notifyReplaced(accountId: string): void {
+    for (const cb of this.replacedListeners) setImmediate(() => cb(accountId));
+  }
+
+  /** The current client if one exists, without creating it. */
+  peek(accountId: string): PlatformClient | undefined {
+    return this.clients.get(accountId)?.client;
+  }
+
   client(row: PlatformAccountRow): PlatformClient {
     const cached = this.clients.get(row.id);
     if (cached && cached.version === row.updated_at) return cached.client;
-    if (cached) void cached.client.close?.().catch(() => undefined);
+    if (cached) {
+      void cached.client.close?.().catch(() => undefined);
+      this.notifyReplaced(row.id);
+    }
 
     const platform = this.platformOf(row);
     const client = platform.createClient({
@@ -72,6 +90,7 @@ export class AccountService {
     const cached = this.clients.get(accountId);
     if (cached) void cached.client.close?.().catch(() => undefined);
     this.clients.delete(accountId);
+    if (cached) this.notifyReplaced(accountId);
   }
 
   /** Builds a throwaway client and validates the credentials (used before saving). */
