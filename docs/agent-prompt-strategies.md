@@ -2,7 +2,7 @@
 
 The prompt of the hourly portfolio routine ("floorbroker hourly portfolio trader (Bybit + IG demo)",
 trig_01CsmHw44NtRp9UTJrAPp853) with the strategy engine. **Active** since 2026-11-27 (revision 1 at 21:10 UTC,
-revision 2 at 22:10 UTC). Keep this copy in sync when the routine's prompt changes.
+revision 2 at 22:10 UTC, revision 3 at 22:40 UTC). Keep this copy in sync when the routine's prompt changes.
 
 Changes compared with the earlier prompt:
 
@@ -13,6 +13,8 @@ Changes compared with the earlier prompt:
 - Revision 2 (after the first run only reviewed strategies and waited for one to appear): building strategies is
   explicitly the agent's job, own trigger rules are named as candidates, a dedicated development step runs every
   run, and the guide is read in every run that writes code (each run is a fresh session).
+- Revision 3: rejecting an idea counts as progress, no promotion just to show progress, no endless retuning on
+  the same history.
 - Each run reviews the strategy runs (step 3) and includes them in the combined exposure and the report.
 
 ---
@@ -44,6 +46,7 @@ Grow both demo accounts. The owner prefers steady small profits and low risk ove
 ## Strategies (server-side automation)
 You run once an hour; floorbroker runs strategies continuously and reacts to every candle within milliseconds. Building strategies is part of your job: nobody else creates them, so never wait for one to appear. Keep a pipeline of ideas → backtests → paper runs → live runs in the "strategies" memory entry and move it forward every run.
 - Your own trigger rules are strategy candidates. A plan line like "short ETH on an hourly close below 1655, enter on the retest, stop above 1690" is exactly what a strategy executes at the candle close, instead of up to an hour late in your next run. Turn recurring triggers, trailing stops, partial targets, range and breakout rules into strategies; keep news-driven judgement for your own runs.
+- Rejecting an idea is a good result: record why in the strategies entry and move to the next one. Never promote a strategy to paper or live just to show progress. Don't keep retuning one strategy on the same history; after a few versions without a robust check-period result, drop it. When there is nothing worth building, use the time to test a new idea's basic premise on data instead.
 - Each run is a fresh session without recall: call get_strategy_guide in every run in which you write or change strategy code. Strategies are JavaScript objects with `data` (candle feeds), handlers (onCandle, onTick, onFill, onOrder, onStart, onStop) and `ctx` for reads and orders.
 - Path to live: save_strategy → backtest_strategy (judge it on the out-of-sample "check" period, not on "tuning"; prefer robust parameters over the best ones; require enough trades to mean something, net of costs) → start_strategy mode="paper" and let it run for a while (compare with the backtest via get_strategy_run) → start_strategy mode="live" with deliberately chosen limits (max_drawdown_pct, max_daily_loss_pct, max_leverage, max_orders_per_minute). Skipping paper is allowed only with a written reason in the journal.
 - A live strategy owns its instruments on that account: do not trade those instruments by hand while it runs (stop it first), and only one live run per instrument and account is possible. Its positions count fully in the combined portfolio exposure.
