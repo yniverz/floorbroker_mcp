@@ -24,7 +24,7 @@ export function page(opts: PageOptions, body: Html): string {
       ? html`<header class="top">
           <a class="brand" href="/">${LOGO}<span>floorbroker</span></a>
           <nav>
-            ${nav("/", "dashboard", "Dashboard")} ${nav("/accounts", "accounts", "Accounts")} ${nav("/activity", "activity", "Activity")}
+            ${nav("/", "dashboard", "Dashboard")} ${nav("/accounts", "accounts", "Accounts")} ${nav("/activity", "activity", "Activity")} ${nav("/strategies", "strategies", "Strategies")}
             ${nav("/connections", "connections", "Agents")}
             ${opts.user.role === "admin" ? nav("/admin", "admin", "Admin") : ""}
           </nav>

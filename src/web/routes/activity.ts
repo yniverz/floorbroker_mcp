@@ -36,6 +36,16 @@ export function summarizeCall(c: ToolCallRow): Html {
       return html`Protect <code>${s("position_id")}</code> SL ${s("stop_loss") || "–"} TP ${s("take_profit") || "–"}`;
     case "set_leverage":
       return html`Leverage ${s("leverage")}x on <code>${s("instrument_id")}</code>`;
+    case "strategy:place_order": {
+      const px = a.price !== undefined ? ` @ ${s("price")}` : a.triggerPrice !== undefined ? ` trigger ${s("triggerPrice")}` : "";
+      return html`<span class="badge agent">strategy</span> <span class="side ${s("side")}">${s("side").toUpperCase()}</span> ${s("size")} <code>${s("instrumentId")}</code> ${s("type")}${px}${a.stopLoss !== undefined ? html` <span class="muted">(SL ${s("stopLoss")})</span>` : ""}`;
+    }
+    case "strategy:cancel_order":
+      return html`<span class="badge agent">strategy</span> Cancel order <code>${s("orderId")}</code>`;
+    case "strategy:close_position":
+      return html`<span class="badge agent">strategy</span> Close <code>${s("positionId")}</code>${a.size !== undefined ? ` (${s("size")})` : ""}`;
+    case "strategy:set_position_protection":
+      return html`<span class="badge agent">strategy</span> Protect <code>${s("positionId")}</code> SL ${s("stopLoss") || "–"} TP ${s("takeProfit") || "–"}`;
     default: {
       const target = a.instrument_id ?? (Array.isArray(a.instrument_ids) ? (a.instrument_ids as string[]).join(", ") : a.query);
       return html`<span class="muted">${c.tool}</span>${target ? html` <code>${String(target)}</code>` : ""}`;

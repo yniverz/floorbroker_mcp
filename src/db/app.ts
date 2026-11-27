@@ -213,6 +213,96 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX idx_audit_time ON audit_events(created_at);
   `,
+  // 2: server-side strategies (code versions, runs, their logs/fills/equity, backtests)
+  `
+  CREATE TABLE strategies (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    description TEXT,
+    latest_version INTEGER NOT NULL DEFAULT 0,
+    archived INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX idx_strategies_user ON strategies(user_id);
+
+  CREATE TABLE strategy_versions (
+    strategy_id TEXT NOT NULL REFERENCES strategies(id) ON DELETE CASCADE,
+    version INTEGER NOT NULL,
+    code TEXT NOT NULL,
+    note TEXT,
+    declaration_json TEXT NOT NULL,
+    connection_id TEXT,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (strategy_id, version)
+  );
+
+  CREATE TABLE strategy_runs (
+    id TEXT PRIMARY KEY,
+    strategy_id TEXT NOT NULL REFERENCES strategies(id) ON DELETE CASCADE,
+    version INTEGER NOT NULL,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    account_id TEXT NOT NULL REFERENCES platform_accounts(id) ON DELETE CASCADE,
+    connection_id TEXT,
+    mode TEXT NOT NULL CHECK (mode IN ('paper','live')),
+    status TEXT NOT NULL CHECK (status IN ('running','stopped','error')),
+    params_json TEXT NOT NULL DEFAULT '{}',
+    limits_json TEXT NOT NULL DEFAULT '{}',
+    state_json TEXT NOT NULL DEFAULT '{}',
+    broker_json TEXT,
+    currency TEXT,
+    start_equity REAL,
+    last_equity REAL,
+    started_at INTEGER NOT NULL,
+    stopped_at INTEGER,
+    stop_reason TEXT,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX idx_strategy_runs_user ON strategy_runs(user_id, status);
+
+  CREATE TABLE strategy_run_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL REFERENCES strategy_runs(id) ON DELETE CASCADE,
+    t INTEGER NOT NULL,
+    msg TEXT NOT NULL
+  );
+  CREATE INDEX idx_strategy_run_logs ON strategy_run_logs(run_id, id);
+
+  CREATE TABLE strategy_run_fills (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL REFERENCES strategy_runs(id) ON DELETE CASCADE,
+    t INTEGER NOT NULL,
+    instrument_id TEXT NOT NULL,
+    side TEXT NOT NULL,
+    size REAL NOT NULL,
+    price REAL NOT NULL,
+    fee REAL,
+    pnl REAL,
+    reason TEXT,
+    tag TEXT,
+    order_id TEXT
+  );
+  CREATE INDEX idx_strategy_run_fills ON strategy_run_fills(run_id, t);
+
+  CREATE TABLE strategy_run_equity (
+    run_id TEXT NOT NULL REFERENCES strategy_runs(id) ON DELETE CASCADE,
+    ts INTEGER NOT NULL,
+    equity REAL NOT NULL,
+    PRIMARY KEY (run_id, ts)
+  );
+
+  CREATE TABLE strategy_backtests (
+    id TEXT PRIMARY KEY,
+    strategy_id TEXT NOT NULL REFERENCES strategies(id) ON DELETE CASCADE,
+    version INTEGER NOT NULL,
+    account_id TEXT,
+    request_json TEXT NOT NULL,
+    summary_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX idx_strategy_backtests ON strategy_backtests(strategy_id, created_at);
+  `,
 ];
 
 export function openAppDb(file: string): Db {

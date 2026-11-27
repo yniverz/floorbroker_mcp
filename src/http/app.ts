@@ -16,6 +16,7 @@ import { activityRouter } from "../web/routes/activity.js";
 import { adminRouter, meRouter } from "../web/routes/admin.js";
 import { authRouter } from "../web/routes/auth.js";
 import { connectionsRouter } from "../web/routes/connections.js";
+import { strategiesRouter } from "../web/routes/strategies.js";
 import { dashboardRouter } from "../web/routes/dashboard.js";
 import { CSP_DIRECTIVES } from "./csp.js";
 
@@ -99,6 +100,7 @@ export function createApp(ctx: AppContext): express.Express {
   ui.use("/accounts", accountsRouter(ctx));
   ui.use("/activity", activityRouter(ctx));
   ui.use("/connections", connectionsRouter(ctx));
+  ui.use("/strategies", strategiesRouter(ctx));
   ui.use("/account", meRouter(ctx));
   ui.use("/admin", adminRouter(ctx));
   ui.use(dashboardRouter(ctx));

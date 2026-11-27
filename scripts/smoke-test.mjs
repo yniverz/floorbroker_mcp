@@ -256,6 +256,53 @@ try {
   const pos = await call("get_positions", { account_id: acct.id });
   check(pos.isError && pos.data.error === "auth_failed", "authenticated call with dummy key → auth_failed", pos.data.message);
 
+  // Strategies: save, backtest on real Bybit history, paper run on the live stream, stop.
+  const guide = await call("get_strategy_guide", {});
+  check(!guide.isError && guide.data.guide.includes("ctx.order"), "get_strategy_guide");
+  const broken = await call("save_strategy", { name: "Broken", code: "const strategy = { data: [ };" });
+  check(broken.isError && /does not load/.test(broken.data.message), "save_strategy rejects code that does not load", broken.data.message);
+  const stratCode = `const strategy = {
+    name: "smoke ema",
+    params: { fast: 5, slow: 20 },
+    data: [{ instrument: "linear:BTCUSDT", resolution: "1h", history: 50 }],
+    ticks: ["linear:BTCUSDT"],
+    onStart(ctx) { ctx.log("start", ctx.params.fast, ctx.params.slow); },
+    onTick(ctx, q) { if (!ctx.state.ticked) { ctx.state.ticked = true; ctx.log("first tick", q.bid, q.ask); } },
+    onCandle(ctx, bar) {
+      const c = ta.closes(ctx.candles(bar.instrument, "1h", 60));
+      const f = ta.ema(c, ctx.params.fast), s = ta.ema(c, ctx.params.slow);
+      const pos = ctx.position(bar.instrument);
+      const size = ctx.roundSize(bar.instrument, ctx.account().equity * 0.5 / bar.c);
+      if (ta.crossOver(f, s) && (!pos || pos.side === "short")) { if (pos) ctx.close(bar.instrument); ctx.buy(bar.instrument, size, { stopLoss: ctx.roundPrice(bar.instrument, bar.c * 0.97), tag: "long" }); }
+      if (ta.crossUnder(f, s) && (!pos || pos.side === "long")) { if (pos) ctx.close(bar.instrument); ctx.sell(bar.instrument, size, { stopLoss: ctx.roundPrice(bar.instrument, bar.c * 1.03), tag: "short" }); }
+    },
+  };`;
+  const saved = await call("save_strategy", { name: "Smoke EMA", code: stratCode, note: "first" });
+  check(!saved.isError && saved.data.version === 1 && saved.data.declaration?.handlers?.includes("onCandle"), "save_strategy", saved.data);
+  const sid = saved.data.strategy_id;
+  const bt = await call("backtest_strategy", { strategy_id: sid, account_id: acct.id, from: new Date(Date.now() - 20 * 86400_000).toISOString(), initial_equity: 1000 });
+  check(!bt.isError && bt.data.bars_processed > 400 && typeof bt.data.check?.return_pct === "number" && bt.data.total?.closed_trades > 0, "backtest_strategy on Bybit history",
+    bt.isError ? bt.data : { bars: bt.data.bars_processed, total: bt.data.total, check: bt.data.check?.return_pct, stopped: bt.data.stopped_early });
+  const started = await call("start_strategy", { strategy_id: sid, account_id: acct.id, mode: "paper", paper_equity: 1000 });
+  check(!started.isError && started.data.status === "running", "start_strategy paper (read-only connection)", started.data);
+  const liveDenied = await call("start_strategy", { strategy_id: sid, account_id: acct.id, mode: "live" });
+  check(liveDenied.isError && liveDenied.data.error === "permission_denied", "start_strategy live denied on a read-only connection", liveDenied.data.message);
+  let runInfo = null;
+  for (let i = 0; i < 20; i++) {
+    await new Promise((r) => setTimeout(r, 1000));
+    runInfo = await call("get_strategy_run", { run_id: started.data.run_id });
+    if (runInfo.data.logs?.some((l) => l.includes("first tick"))) break;
+  }
+  check(!runInfo.isError && runInfo.data.logs?.some((l) => l.includes("first tick")) && runInfo.data.stream === "connected", "paper run receives live ticks", { stream: runInfo.data.stream, logs: runInfo.data.logs });
+  for (const p of ["/strategies", `/strategies/${sid}`, `/strategies/runs/${started.data.run_id}`]) {
+    const r = await web(p);
+    check(r.status === 200, `GET ${p}`, r.status);
+  }
+  const stopped = await call("stop_strategy", { run_id: started.data.run_id });
+  check(!stopped.isError && stopped.data.status === "stopped", "stop_strategy", stopped.data);
+  const listed = await call("list_strategies", {});
+  check(!listed.isError && listed.data.strategies?.length === 1 && listed.data.runs?.length === 1, "list_strategies", listed.data.runs);
+
   // UI pages render
   for (const p of ["/", `/accounts/${acct.id}`, "/accounts", "/accounts/new", "/accounts/new?platform=bybit", "/accounts/new?platform=ig", "/activity", "/connections", "/admin", "/account"]) {
     const r = await web(p);

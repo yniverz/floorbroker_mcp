@@ -60,6 +60,8 @@ So you can, for example, let an agent believe a demo account is live. The UI the
 ## MCP tools
 
 Read tools are always available. Trading tools are only listed for connections with the *trade* permission.
+Strategy tools are listed for every connection: read-only connections can backtest and paper-trade, live runs
+need the *trade* permission.
 
 | Tool | Purpose |
 | --- | --- |
@@ -81,6 +83,12 @@ Read tools are always available. Trading tools are only listed for connections w
 | `close_position` | Close fully or partially, market or limit. |
 | `set_position_protection` | Set or remove SL / TP / trailing stop on a position. |
 | `set_leverage` | Per-instrument leverage (Bybit). |
+| `get_strategy_guide` | How to write strategies (API, sandbox rules, simulation model). |
+| `list_strategies` / `get_strategy` | Saved strategies, versions, backtests, runs. |
+| `save_strategy` | Create a strategy or a new version; the code is checked in the sandbox. |
+| `backtest_strategy` | Backtest on cached/fetched history with a tuning and an out-of-sample check period. |
+| `start_strategy` / `stop_strategy` | Run a strategy on paper (simulated fills on live prices) or live; stop it. |
+| `get_strategy_run` | Equity, PnL, positions, fills and logs of a run. |
 
 Capabilities differ per platform (e.g. IG has no order book or leverage setting), and `list_accounts` tells the
 agent which apply. Unsupported calls return a clear `unsupported` error.
@@ -224,7 +232,7 @@ be edited (accounts, permission, limits) or revoked at any time under **Agents**
 ## Live data streams
 
 Adapters can offer a live stream (`PlatformClient.stream()`), used through floorbroker's
-`StreamService`. It is the foundation for server-side strategies (in progress) and needs no
+`StreamService`. It feeds the [strategy engine](#strategies) and needs no
 configuration: a stream connects on the first subscription and closes when nothing is subscribed.
 
 | | Bybit | IG |
@@ -242,6 +250,46 @@ configuration: a stream connects on the first subscription and closes when nothi
 - **Status:** the account page shows a "Live stream" line while something is subscribed.
 - **Check tool:** `node dist/tools/streamCheck.js <account-id> <instrument-id> [resolution] [seconds] [--account-events]` is a read-only check that subscribes and prints what arrives.
 - **Proxy:** Bybit's private stream uses the IP-bound API key, so it leaves through `OUTBOUND_PROXY` like REST calls. The proxy must allow the stream hosts (`stream.bybit.com`, `stream-demo.bybit.com`, `stream-testnet.bybit.com`). Public market data connects directly.
+
+## Strategies
+
+Agents can hand rules they can state precisely to floorbroker: a strategy is a small JavaScript program that
+runs on the server 24/7 and reacts to every completed candle (and, optionally, live quotes) within
+milliseconds. The agent writes, backtests, paper-trades and starts it through MCP; nobody has to touch code
+or the server. The full agent-facing reference is [src/strategies/guide.ts](src/strategies/guide.ts)
+(returned by `get_strategy_guide`).
+
+```js
+const strategy = {
+  params: { fast: 20, slow: 50 },
+  data: [{ instrument: "linear:BTCUSDT", resolution: "15m", history: 300 }],
+  onCandle(ctx, bar) {
+    const c = ta.closes(ctx.candles(bar.instrument, "15m", 200));
+    const fast = ta.ema(c, ctx.params.fast), slow = ta.ema(c, ctx.params.slow);
+    if (!ctx.position(bar.instrument) && ta.crossOver(fast, slow)) ctx.buy(bar.instrument, 0.01, { stopLoss: bar.c * 0.98 });
+  },
+};
+```
+
+- **Sandbox:** every strategy runs in its own QuickJS (WebAssembly) runtime with no network, files, timers or
+  imports, 32 MB memory and 250 ms per event (1 s for `onStart`). The only bridge is `ctx`: synchronous reads
+  (candles, last price, position, orders, account, instrument rules) and order *intents*, which floorbroker
+  executes after the handler returns. A handler that throws executes nothing; five errors in a row stop the run.
+- **Backtests** run in worker threads on candles from the cache (missing ranges are fetched; on IG only with
+  `allow_fetch`, after an estimate of the weekly allowance it would spend). Results are split into a tuning
+  and an out-of-sample check period. Fills are conservative: market orders at the next open plus slippage,
+  limits only when traded through, stop loss wins when SL and TP are hit in the same candle; Bybit fees,
+  IG spreads. Funding/overnight financing and partial fills are not simulated.
+- **Paper runs** use the same simulated broker, fed by the live price stream.
+- **Live runs** place real orders through the platform client with the starting connection's risk limits,
+  and appear in the activity log as `strategy:*` actions attributed to that agent. One live run per instrument
+  and account; the run keeps its own ledger for PnL.
+- **Run limits** (per run, chosen by the agent; defaults): max drawdown 10 % and max daily loss 5 % (stop the
+  run and close its positions), max leverage 3x and 20 orders/minute (block the order).
+- **Restarts:** running runs resume after a server restart with their state, paper account and order mapping
+  (`onStart` is called again with `ctx.state` restored).
+- **UI:** *Strategies* lists runs and strategies; a run page shows equity, positions, fills and logs, and has a
+  stop button (optionally closing positions).
 
 ## Adding a platform
 
@@ -264,9 +312,11 @@ npm run build
 ENCRYPTION_KEY=$(openssl rand -base64 32) ADMIN_PASSWORD=change-me-please PUBLIC_URL=http://localhost:8080 npm start
 ```
 
-`npm test` builds and runs [scripts/smoke-test.mjs](scripts/smoke-test.mjs): it starts a throwaway server and
-walks through OAuth (registration, PKCE, refresh, code replay), MCP initialize/tools, and Bybit public market
-data through the candle cache.
+`npm test` builds and runs [scripts/strategy-test.mjs](scripts/strategy-test.mjs) (sandbox limits, simulated
+fills, engine error handling, backtest determinism, live venue against a mock client) and
+[scripts/smoke-test.mjs](scripts/smoke-test.mjs): it starts a throwaway server and walks through OAuth
+(registration, PKCE, refresh, code replay), MCP initialize/tools, Bybit public market data through the candle
+cache, and a strategy save → backtest → paper run on the live stream → stop.
 
 ### Status
 

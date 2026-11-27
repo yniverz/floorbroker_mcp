@@ -33,6 +33,7 @@ async function main(): Promise<void> {
   });
 
   ctx.sync.start();
+  void ctx.strategies.resumeAll().catch((err) => logger.warn("resuming strategy runs failed", { err: String(err) }));
   const housekeeping = setInterval(() => {
     try {
       ctx.connections.purgeExpired();
@@ -47,6 +48,7 @@ async function main(): Promise<void> {
     logger.info("shutting down", { signal });
     clearInterval(housekeeping);
     ctx.sync.stop();
+    void ctx.strategies.closeAll();
     void ctx.streams.closeAll();
     server.close(() => {
       void ctx.accountService.closeAll().finally(() => {

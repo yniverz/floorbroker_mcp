@@ -8,6 +8,7 @@ import type { PlatformAccountRow } from "../repos/accounts.js";
 import type { Connection } from "../repos/connections.js";
 import { checkLeverage, checkOrder, hasLimits, instrumentAllowed } from "../services/risk.js";
 import { iso, parseTime, present } from "./present.js";
+import { registerStrategyTools } from "./strategyTools.js";
 
 export interface McpCaller {
   userId: string;
@@ -15,7 +16,7 @@ export interface McpCaller {
   ip: string | null;
 }
 
-interface ToolEnv {
+export interface ToolEnv {
   ctx: AppContext;
   caller: McpCaller;
 }
@@ -41,7 +42,7 @@ const price = z.number().positive().finite();
 
 // --- helpers ----------------------------------------------------------------
 
-function resolveAccount(env: ToolEnv, id: string, opts: { trade?: boolean } = {}): AccountHandle {
+export function resolveAccount(env: ToolEnv, id: string, opts: { trade?: boolean } = {}): AccountHandle {
   const { ctx, caller } = env;
   const row = ctx.accounts.findForUser(id, caller.userId);
   if (!row || !caller.connection.accountIds.includes(row.id)) {
@@ -77,7 +78,7 @@ function requireCapability(h: AccountHandle, has: boolean, what: string): void {
 }
 
 /** Registers a tool with uniform logging, error mapping and result shaping. */
-function tool<S extends z.ZodRawShape>(
+export function tool<S extends z.ZodRawShape>(
   server: McpServer,
   env: ToolEnv,
   name: string,
@@ -430,6 +431,9 @@ export function registerTools(server: McpServer, ctx: AppContext, caller: McpCal
       return { closed: rows.slice(0, limit), totalPnl: Math.round(total * 1e8) / 1e8 };
     },
   );
+
+  // Strategy tools are available to read-only connections too (backtests, paper runs); live runs check trading access.
+  registerStrategyTools(server, env);
 
   if (!canTrade) return;
 
